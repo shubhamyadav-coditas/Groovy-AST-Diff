@@ -1,15 +1,16 @@
-int value = 0
-
-void add(int number) {
-    value += number
+// write function that prints "Hello, World!"
+void printHelloWorld() {
+    println "Hello, World!"
 }
+// write for loop
+for (int i = 0; i < 5; i++) {
+    printHelloWorld()
 
-// NEW FUNCTION - will be detected as ADDED
-void subtract(int number) {
-    value -= number
-}
+    while (i < 6) {
+        printHelloWorld()
 
-// NEW FUNCTION - will be detected as ADDED  
-int getValue() {
-    return value
+        if (i == 6) {
+            printHelloWorld()
+        }
+    }
 }

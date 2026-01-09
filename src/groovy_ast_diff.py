@@ -26,6 +26,9 @@ import difflib
 # Suppress tree-sitter deprecation warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="tree_sitter")
 
+# Increase recursion limit for deep AST structures
+sys.setrecursionlimit(5000)
+
 import tree_sitter
 from tree_sitter import Language, Parser, Node
 
@@ -145,7 +148,7 @@ class GroovyASTDiff:
         file_b_path: str = ""
     ) -> ComparisonResult:
         """
-        Compare two Groovy sources and return detailed differences.
+        Compare two Groovy sources using recursive AST parsing and return detailed hierarchical differences.
         
         Args:
             source_a: Source code of first file as bytes
@@ -154,7 +157,7 @@ class GroovyASTDiff:
             file_b_path: Path to second file (for metadata)
             
         Returns:
-            ComparisonResult with BlockDiff and nested StatementDiff
+            ComparisonResult with hierarchical BlockDiff and nested StatementDiff
         """
         try:
             # Parse both sources
@@ -164,21 +167,95 @@ class GroovyASTDiff:
             if tree_a.root_node.has_error or tree_b.root_node.has_error:
                 return self._error_result("One or both sources have syntax errors")
             
-            print("Extracting top-level blocks...")
-            # Extract top-level blocks
-            blocks_a = self._extract_top_level_blocks(tree_a.root_node, source_a)
-            blocks_b = self._extract_top_level_blocks(tree_b.root_node, source_b)
+            print("Extracting hierarchical signatures using recursive parser...")
+            # Extract hierarchical signatures using recursive parser
+            signatures_a = self._extract_recursive_signatures(tree_a.root_node, source_a)
+            signatures_b = self._extract_recursive_signatures(tree_b.root_node, source_b)
             
-            print(f"Found {len(blocks_a)} blocks in file A, {len(blocks_b)} blocks in file B")
+            print(f"Found {len(signatures_a)} top-level blocks in file A, {len(signatures_b)} in file B")
             
-            # Compare blocks and generate diffs
-            print("Comparing blocks...")
-            return self._compare_blocks(blocks_a, blocks_b, source_a, source_b, file_a_path, file_b_path)
+            # Compare using recursive approach
+            print("Comparing using recursive approach...")
+            return self._compare_recursive_signatures(signatures_a, signatures_b, source_a, source_b, file_a_path, file_b_path)
             
         except Exception as e:
             import traceback
             traceback.print_exc()
             return self._error_result(f"Comparison failed: {e}")
+    
+    def _extract_recursive_signatures(self, root_node: Node, source: bytes) -> List[Any]:
+        """
+        Extract top-level blocks using recursive parser to build hierarchical signatures.
+        
+        This replaces the old flat block extraction with recursive parsing that
+        captures the full hierarchy of nested structures.
+        """
+        signatures = []
+        print("####################################################################################################")
+        
+        # Process each top-level child node
+        for child in root_node.named_children:
+            # Skip structural nodes that aren't meaningful blocks
+            if child.type in {'identifier', 'type', 'parameters', 'formal_parameters'}:
+                continue
+            
+            # Check if this is a recognized top-level block type
+            block_type = GROOVY_NODE_TYPE_TO_BLOCK_TYPE.get(child.type)
+            if block_type:
+                # Use recursive parser to build hierarchical signature
+                signature = self.recursive_parser.parse_recursive(child, source)
+                signatures.append(signature)
+        
+        return signatures
+    
+    def _compare_recursive_signatures(
+        self, 
+        signatures_a: List[Any], 
+        signatures_b: List[Any], 
+        source_a: bytes, 
+        source_b: bytes,
+        file_a_path: str = "",
+        file_b_path: str = ""
+    ) -> ComparisonResult:
+        """
+        Compare hierarchical signatures using recursive matching and generate nested diffs.
+        
+        This implements the full recursive comparison approach similar to the JavaScript POC.
+        """
+        # Convert recursive signatures to BlockSignature format for compatibility
+        blocks_a = self._convert_recursive_to_block_signatures(signatures_a)
+        blocks_b = self._convert_recursive_to_block_signatures(signatures_b)
+        
+        # Use the existing comparison logic but with enhanced recursive statement analysis
+        return self._compare_blocks(blocks_a, blocks_b, source_a, source_b, file_a_path, file_b_path)
+    
+    def _convert_recursive_to_block_signatures(self, recursive_signatures: List[Any]) -> List[BlockSignature]:
+        """
+        Convert recursive signatures to BlockSignature format for compatibility with existing comparison logic.
+        
+        This allows us to leverage the existing multi-phase matching while using recursive parsing.
+        """
+        block_signatures = []
+        
+        for sig in recursive_signatures:
+            # Map recursive signature to BlockSignature
+            block_type = GROOVY_NODE_TYPE_TO_BLOCK_TYPE.get(sig.node_type, BlockType.UNKNOWN)
+            
+            block_sig = BlockSignature(
+                block_type=block_type,
+                identifier=sig.identifier or sig.content_hash[:16],
+                content_hash=sig.content_hash,
+                start_line=sig.start_line,
+                end_line=sig.end_line,
+                code=sig.code,
+                node_type=sig.node_type,
+                children_count=len(sig.children),
+                modifiers=[]  # TODO: Extract modifiers from recursive signature
+            )
+            
+            block_signatures.append(block_sig)
+        
+        return block_signatures
     
     def _extract_top_level_blocks(self, root_node: Node, source: bytes) -> List[BlockSignature]:
         """
@@ -191,6 +268,7 @@ class GroovyASTDiff:
         def extract_blocks_recursive(node: Node, depth: int = 0, in_class: bool = False):
             """Recursively extract blocks from the AST."""
             node_type = node.type
+            
             
             # Skip certain nodes that aren't meaningful blocks
             if node_type in {'program', 'source_file', 'compilation_unit'}:
@@ -206,9 +284,8 @@ class GroovyASTDiff:
                 if block:
                     blocks.append(block)
                     
-                    # If this is a class, also extract its methods and fields
-                    if node_type in GROOVY_CLASS_TYPES:
-                        self._extract_class_members(node, source, blocks)
+                    # Class methods and fields will be analyzed as statements within the class
+                    # during statement-level comparison, not as separate top-level blocks
                     return  # Don't recurse further after extracting a block
             
             # For non-block nodes, check children (but only at shallow depth)
@@ -323,7 +400,7 @@ class GroovyASTDiff:
                             return source[grandchild.start_byte:grandchild.end_byte].decode('utf-8', errors='replace')
                 elif child.type == "identifier":
                     return source[child.start_byte:child.end_byte].decode('utf-8', errors='replace')
-        
+
         # Generic fallback - look for any identifier child
         for child in node.named_children:
             if child.type == "identifier":
@@ -373,11 +450,11 @@ class GroovyASTDiff:
                     block_a.identifier == block_b.identifier):
                     
                     if block_a.content_hash == block_b.content_hash:
-                        # Check if position changed (moved)
-                        if i != j or block_a.start_line != block_b.start_line:
+                        # Check if position changed (moved) - prioritize line position over array position
+                        if block_a.start_line != block_b.start_line:
                             change_type = ChangeType.MOVED
                             similarity = 100.0
-                            description = f"Moved {block_a.block_type.value} '{block_a.identifier}' from position {i+1} to {j+1}"
+                            description = f"Moved {block_a.block_type.value} '{block_a.identifier}' from line {block_a.start_line} to line {block_b.start_line}"
                         else:
                             change_type = ChangeType.UNCHANGED
                             similarity = 100.0
@@ -461,56 +538,113 @@ class GroovyASTDiff:
                     matched_b.add(j)
                     break
         
-        # Phase 3: Match by structural similarity
+        # Phase 3: Match by structural similarity (hybrid approach)
         print("Phase 3: Matching by structural similarity...")
+        
+        # First pass: Use original greedy matching for high-confidence matches
+        temp_matched_a = set()
+        temp_matched_b = set()
+        high_confidence_matches = []
+        
         for i, block_a in enumerate(blocks_a):
             if i in matched_a:
                 continue
             for j, block_b in enumerate(blocks_b):
-                if (j not in matched_b and
+                if (j not in matched_b and j not in temp_matched_b and
                     block_a.block_type == block_b.block_type):
                     
                     similarity = calculate_similarity(block_a.code, block_b.code)
                     
-                    if similarity >= 0.3:  # Lower threshold to catch more changes
-                        # Determine change type based on identifier and position
-                        if block_a.identifier == block_b.identifier:
-                            # Same identifier - check if position changed (moved and modified)
-                            if i != j:  # Different array positions = moved
-                                change_type = ChangeType.MOVED_MODIFIED
-                                description = f"Moved and modified {block_a.block_type.value} '{block_a.identifier}' from position {i+1} to {j+1} ({similarity*100:.1f}% similar)"
-                            else:
-                                # Same position - just modified
-                                change_type = ChangeType.MODIFIED
-                                description = f"Modified {block_a.block_type.value} '{block_a.identifier}' ({similarity*100:.1f}% similar)"
-                        else:
-                            # Different identifiers - this is likely a different function altogether
-                            # Skip this match and let it be handled as separate add/delete
-                            continue
-                        
-                        diff = BlockDiff(
-                            change_type=change_type,
-                            block_type=block_a.block_type,
-                            identifier=block_b.identifier,
-                            file_a_start_line=block_a.start_line,
-                            file_a_end_line=block_a.end_line,
-                            file_a_code=block_a.code,
-                            file_b_start_line=block_b.start_line,
-                            file_b_end_line=block_b.end_line,
-                            file_b_code=block_b.code,
-                            similarity_score=similarity * 100,
-                            description=description,
-                            modifiers=block_b.modifiers
-                        )
-                        
-                        # Add statement-level comparison for modified and moved_modified blocks
-                        if change_type in [ChangeType.MODIFIED, ChangeType.MOVED_MODIFIED]:
-                            diff.statement_diffs = self._compare_statements(block_a, block_b, source_a, source_b)
-                        
-                        diffs.append(diff)
-                        matched_a.add(i)
-                        matched_b.add(j)
-                        break
+                    # Use higher threshold for comments (70%) as they need stronger similarity
+                    threshold = 0.7 if block_a.block_type == BlockType.COMMENT else 0.3
+                    
+                    # High confidence threshold - if similarity is very high, match immediately
+                    high_confidence_threshold = 0.9
+                    
+                    if similarity >= high_confidence_threshold:
+                        high_confidence_matches.append((similarity, i, j, block_a, block_b))
+                        temp_matched_a.add(i)
+                        temp_matched_b.add(j)
+                        break  # Take first high-confidence match (original behavior)
+        
+        # Second pass: For remaining blocks, use best-match approach
+        similarity_candidates = []
+        for i, block_a in enumerate(blocks_a):
+            if i in matched_a or i in temp_matched_a:
+                continue
+            for j, block_b in enumerate(blocks_b):
+                if (j not in matched_b and j not in temp_matched_b and
+                    block_a.block_type == block_b.block_type):
+                    
+                    similarity = calculate_similarity(block_a.code, block_b.code)
+                    threshold = 0.7 if block_a.block_type == BlockType.COMMENT else 0.3
+                    
+                    if similarity >= threshold:
+                        similarity_candidates.append((similarity, i, j, block_a, block_b))
+        
+        # Sort by similarity (highest first) for best matches on remaining blocks
+        similarity_candidates.sort(key=lambda x: x[0], reverse=True)
+        
+        # Process all matches (high-confidence first, then best-match)
+        all_matches = high_confidence_matches + similarity_candidates
+        
+        for similarity, i, j, block_a, block_b in all_matches:
+            if i in matched_a or j in matched_b:
+                continue  # Already matched
+                
+            # Determine change type based on identifier and position
+            if block_a.identifier == block_b.identifier:
+                # Same identifier - check if position changed (moved and modified)
+                if block_a.start_line != block_b.start_line:  # Different line positions = moved
+                    change_type = ChangeType.MOVED_MODIFIED
+                    description = f"Moved and modified {block_a.block_type.value} '{block_a.identifier}' from position {i} to {j} ({similarity*100:.1f}% similar)"
+                else:
+                    # Same position - just modified
+                    change_type = ChangeType.MODIFIED
+                    description = f"Modified {block_a.block_type.value} '{block_a.identifier}' ({similarity*100:.1f}% similar)"
+            else:
+                # Different identifiers - check if they're hash-based (comments, etc.)
+                # or if they're similar enough to be considered modified
+                is_hash_based_a = (len(block_a.identifier) == 16 and 
+                                 all(c in '0123456789abcdef' for c in block_a.identifier.lower()))
+                is_hash_based_b = (len(block_b.identifier) == 16 and 
+                                 all(c in '0123456789abcdef' for c in block_b.identifier.lower()))
+                
+                if (is_hash_based_a and is_hash_based_b) or \
+                   self._are_identifiers_similar(block_a.identifier, block_b.identifier, similarity):
+                    # Hash-based identifiers or similar identifiers - treat as modified
+                    if block_a.start_line != block_b.start_line:
+                        change_type = ChangeType.MOVED_MODIFIED
+                        description = f"Moved and modified {block_a.block_type.value} '{block_a.identifier}' → '{block_b.identifier}' from position {i} to {j} ({similarity*100:.1f}% similar)"
+                    else:
+                        change_type = ChangeType.MODIFIED
+                        description = f"Modified {block_a.block_type.value} '{block_a.identifier}' → '{block_b.identifier}' ({similarity*100:.1f}% similar)"
+                else:
+                    # Very different identifiers - skip this match
+                    continue
+            
+            diff = BlockDiff(
+                change_type=change_type,
+                block_type=block_a.block_type,
+                identifier=block_b.identifier,
+                file_a_start_line=block_a.start_line,
+                file_a_end_line=block_a.end_line,
+                file_a_code=block_a.code,
+                file_b_start_line=block_b.start_line,
+                file_b_end_line=block_b.end_line,
+                file_b_code=block_b.code,
+                similarity_score=similarity * 100,
+                description=description,
+                modifiers=block_b.modifiers
+            )
+            
+            # Add statement-level comparison for modified and moved_modified blocks
+            if change_type in [ChangeType.MODIFIED, ChangeType.MOVED_MODIFIED]:
+                diff.statement_diffs = self._compare_statements(block_a, block_b, source_a, source_b)
+            
+            diffs.append(diff)
+            matched_a.add(i)
+            matched_b.add(j)
         
         # Phase 4: Remaining unmatched blocks
         print("Phase 4: Processing unmatched blocks...")
@@ -572,7 +706,8 @@ class GroovyASTDiff:
             blocks_added=change_counts[ChangeType.ADDED],
             blocks_deleted=change_counts[ChangeType.DELETED],
             blocks_modified=change_counts[ChangeType.MODIFIED],
-            blocks_moved=change_counts[ChangeType.MOVED] + change_counts[ChangeType.MOVED_MODIFIED],
+            blocks_moved=change_counts[ChangeType.MOVED],
+            blocks_moved_modified=change_counts[ChangeType.MOVED_MODIFIED],
             blocks_unchanged=change_counts[ChangeType.UNCHANGED],
             diffs=diffs,
             file_a_path=file_a_path,
@@ -589,17 +724,16 @@ class GroovyASTDiff:
         source_b: bytes
     ) -> List[StatementDiff]:
         """
-        Compare statements within two modified blocks using improved analysis.
+        Compare statements within two modified blocks using recursive parser analysis.
         
-        For classes, this compares individual methods and fields.
-        For methods, this compares individual statements within the method body.
+        This uses the recursive parser to build hierarchical signatures and compare
+        nested structures at all levels, following the JavaScript POC approach.
         """
         try:
-            # Special handling for class blocks - compare their members
-            if block_a.block_type == BlockType.CLASS:
-                return self._compare_class_members(block_a, block_b, source_a, source_b)
+            # Use recursive parser to analyze both blocks hierarchically
+            print(f"Comparing statements in {block_a.block_type.value} '{block_a.identifier}' using recursive parser...")
             
-            # For other blocks, use recursive parsing
+            # Parse the entire files to get proper context
             tree_a = self.parser.parse(source_a)
             tree_b = self.parser.parse(source_b)
             
@@ -610,12 +744,642 @@ class GroovyASTDiff:
             if not node_a or not node_b:
                 return self._simple_block_comparison(block_a, block_b)
             
-            # Extract and compare individual statements directly
-            return self._compare_function_statements_direct(node_a, node_b, source_a, source_b)
+            # Extract and compare the CONTENTS of the container, not the container itself
+            if node_a.type in GROOVY_CLASS_TYPES:
+                # For classes, extract and compare class members (methods, fields)
+                return self._compare_class_members_directly(node_a, node_b, source_a, source_b)
+            elif node_a.type in GROOVY_FUNCTION_TYPES:
+                # For functions, extract and compare function body statements
+                return self._compare_function_body_directly(node_a, node_b, source_a, source_b)
+            else:
+                # Special handling for if_statement nodes - use branch-aware analysis
+                if node_a.type == "if_statement" and node_b.type == "if_statement":
+                    return self._compare_if_statement_branches(node_a, node_b, source_a, source_b)
+                
+                # For other containers, use generic approach
+                return self._compare_container_contents_directly(node_a, node_b, source_a, source_b)
             
         except Exception as e:
             print(f"Warning: Statement comparison failed, using simple comparison: {e}")
             return self._simple_block_comparison(block_a, block_b)
+    
+    def _are_identifiers_similar(self, id1: str, id2: str, threshold: float = 0.5) -> bool:
+        """
+        Check if two identifiers are similar using Sørensen-Dice coefficient.
+        This helps in matching modified functions/variables with slightly different names.
+        """
+        if not id1 and not id2:
+            return True
+        if not id1 or not id2:
+            return False
+        
+        # Split by common delimiters to get meaningful parts
+        import re
+        parts1 = set(re.split(r'[._]', id1.lower()))
+        parts2 = set(re.split(r'[._]', id2.lower()))
+        
+        intersection = len(parts1.intersection(parts2))
+        union = len(parts1) + len(parts2)
+        
+        return (2 * intersection) / union >= threshold if union > 0 else False
+    
+    def _compare_class_members_directly(self, class_node_a: Node, class_node_b: Node, source_a: bytes, source_b: bytes) -> List[StatementDiff]:
+        """
+        Compare class members (methods, fields) directly without redundant class wrapper.
+        
+        This extracts the actual members and compares them with proper identifier matching
+        and similarity thresholds.
+        """
+        # Find class bodies
+        body_a = self._find_class_body(class_node_a)
+        body_b = self._find_class_body(class_node_b)
+        
+        if not body_a or not body_b:
+            return []
+        
+        # Extract member signatures
+        members_a = []
+        members_b = []
+        
+        for i, child in enumerate(body_a.named_children):
+            # Check if this child is ANY recognized BlockType (truly recursive)
+            block_type = GROOVY_NODE_TYPE_TO_BLOCK_TYPE.get(child.type)
+            if block_type or child.type in {"comment", "line_comment", "block_comment"}:
+                code = source_a[child.start_byte:child.end_byte].decode('utf-8', errors='replace')
+                identifier = self._extract_identifier(child, source_a) or f"member_{i}"
+                
+                member_sig = StatementSignature(
+                    content_hash=hash_content(code),
+                    code=code.strip(),
+                    start_line=child.start_point[0] + 1,
+                    end_line=child.end_point[0] + 1,
+                    index=i,
+                    node_type=child.type,
+                    identifier=identifier
+                )
+                members_a.append(member_sig)
+        
+        for i, child in enumerate(body_b.named_children):
+            # Check if this child is ANY recognized BlockType (truly recursive)
+            block_type = GROOVY_NODE_TYPE_TO_BLOCK_TYPE.get(child.type)
+            if block_type or child.type in {"comment", "line_comment", "block_comment"}:
+                code = source_b[child.start_byte:child.end_byte].decode('utf-8', errors='replace')
+                identifier = self._extract_identifier(child, source_b) or f"member_{i}"
+                
+                member_sig = StatementSignature(
+                    content_hash=hash_content(code),
+                    code=code.strip(),
+                    start_line=child.start_point[0] + 1,
+                    end_line=child.end_point[0] + 1,
+                    index=i,
+                    node_type=child.type,
+                    identifier=identifier
+                )
+                members_b.append(member_sig)
+        
+        # Compare members with proper identifier matching and similarity thresholds
+        return self._compare_statement_lists(members_a, members_b, class_node_a, class_node_b, source_a, source_b)
+    
+    def _compare_function_body_directly(self, func_node_a: Node, func_node_b: Node, source_a: bytes, source_b: bytes) -> List[StatementDiff]:
+        """
+        Compare function body statements directly without redundant function wrapper.
+        """
+        # Find function bodies
+        body_a = self._find_function_body(func_node_a)
+        body_b = self._find_function_body(func_node_b)
+        
+        if not body_a or not body_b:
+            return []
+        
+        # Extract body statements
+        statements_a = []
+        statements_b = []
+        
+        for i, child in enumerate(body_a.named_children):
+            code = source_a[child.start_byte:child.end_byte].decode('utf-8', errors='replace')
+            identifier = self._extract_statement_identifier(child, source_a) or f"stmt_{i}"
+            
+            stmt_sig = StatementSignature(
+                content_hash=hash_content(code),
+                code=code.strip(),
+                start_line=child.start_point[0] + 1,
+                end_line=child.end_point[0] + 1,
+                index=i,
+                node_type=child.type,
+                identifier=identifier
+            )
+            statements_a.append(stmt_sig)
+        
+        for i, child in enumerate(body_b.named_children):
+            code = source_b[child.start_byte:child.end_byte].decode('utf-8', errors='replace')
+            identifier = self._extract_statement_identifier(child, source_b) or f"stmt_{i}"
+            
+            stmt_sig = StatementSignature(
+                content_hash=hash_content(code),
+                code=code.strip(),
+                start_line=child.start_point[0] + 1,
+                end_line=child.end_point[0] + 1,
+                index=i,
+                node_type=child.type,
+                identifier=identifier
+            )
+            statements_b.append(stmt_sig)
+        
+        # Compare statements
+        return self._compare_statement_lists(statements_a, statements_b, func_node_a, func_node_b, source_a, source_b)
+    
+    def _compare_container_contents_directly(self, node_a: Node, node_b: Node, source_a: bytes, source_b: bytes) -> List[StatementDiff]:
+        """
+        Generic container content comparison for other container types.
+        """
+        # Extract direct children
+        children_a = self._extract_container_children(node_a, source_a)
+        children_b = self._extract_container_children(node_b, source_b)
+        
+        # Compare children
+        return self._compare_statement_lists(children_a, children_b, node_a, node_b, source_a, source_b)
+    
+    def _compare_container_generically(self, node_a, node_b, source_a: bytes, source_b: bytes) -> List[StatementDiff]:
+        """
+        GENERIC recursive comparison that works for ANY container type.
+        
+        This replaces all the specialized logic (classes, functions, etc.) with
+        a single unified approach that can handle:
+        - Classes (methods, fields, comments)
+        - Functions (statements, nested blocks)  
+        - Control flow (if/else, loops, try/catch)
+        - Any other container construct
+        """
+        try:
+            # Step 1: Extract direct children from both containers
+            children_a = self._extract_container_children(node_a, source_a)
+            children_b = self._extract_container_children(node_b, source_b)
+            
+            # Step 2: Compare the children using the same logic as statement comparison
+            statement_diffs = self._compare_statement_lists(children_a, children_b, node_a, node_b, source_a, source_b)
+            
+            # Step 3: For any matched container children, recurse deeper
+            for diff in statement_diffs:
+                if (diff.change_type in [StatementChangeType.MODIFIED, StatementChangeType.MOVED_MODIFIED] and
+                    self._is_container_node(diff.node_type)):
+                    
+                    # Find the original nodes for recursive comparison
+                    child_node_a = self._find_child_node_by_line(node_a, diff.file_a_line)
+                    child_node_b = self._find_child_node_by_line(node_b, diff.file_b_line)
+                    
+                    if child_node_a and child_node_b:
+                        # Recursively compare the contents of this container
+                        child_diffs = self._compare_container_generically(
+                            child_node_a, child_node_b, source_a, source_b
+                        )
+                        diff.child_diffs = child_diffs
+            
+            return statement_diffs
+            
+        except Exception as e:
+            print(f"Warning: Generic container comparison failed: {e}")
+            # Fallback to the old class-specific logic for compatibility
+            if node_a.type in GROOVY_CLASS_TYPES:
+                return self._extract_and_compare_class_members(node_a, node_b, source_a, source_b)
+            else:
+                return self._extract_and_compare_function_statements(node_a, node_b, source_a, source_b)
+    
+    def _compare_if_statement_branches(
+        self,
+        node_a,
+        node_b,
+        source_a: bytes,
+        source_b: bytes
+    ) -> List[StatementDiff]:
+        """
+        Compare if_statement nodes using branch-aware analysis similar to JavaScript POC.
+        
+        This method extracts and compares individual branches (if, else if, else)
+        and detects changes at the branch level.
+        """
+        diffs = []
+        
+        # Extract branches from both nodes
+        branches_a = self._extract_if_branches(node_a, source_a)
+        branches_b = self._extract_if_branches(node_b, source_b)
+        
+        # Track which branches have been matched
+        matched_a = set()
+        matched_b = set()
+        
+        # Phase 1: Match by condition (for if/else if branches)
+        for i, branch_a in enumerate(branches_a):
+            if i in matched_a:
+                continue
+                
+            for j, branch_b in enumerate(branches_b):
+                if j in matched_b:
+                    continue
+                
+                # Match by condition for if/else_if branches
+                if (branch_a["branch_type"] in ["if", "else_if"] and 
+                    branch_b["branch_type"] in ["if", "else_if"] and
+                    branch_a["condition"] == branch_b["condition"]):
+                    
+                    # Same condition - compare body statements
+                    body_diffs = self._compare_statement_lists_generic(
+                        branch_a["statements"], branch_b["statements"], source_a, source_b
+                    )
+                    
+                    if not body_diffs:
+                        # Unchanged branch
+                        change_type = StatementChangeType.UNCHANGED
+                        desc = f"{branch_a['branch_type']} ({branch_a['condition']}) unchanged"
+                    else:
+                        # Modified branch body
+                        change_type = StatementChangeType.MODIFIED
+                        desc = f"{branch_a['branch_type']} ({branch_a['condition']}) body modified"
+                    
+                    branch_label = f"{branch_a['branch_type']}({branch_a['condition']})"
+                    
+                    diffs.append(StatementDiff(
+                        change_type=change_type,
+                        code=branch_b["code"],
+                        node_type="if_branch",
+                        file_a_line=branch_a["start_line"],
+                        file_a_index=i,
+                        file_b_line=branch_b["start_line"],
+                        file_b_index=j,
+                        description=desc,
+                        old_code=branch_a["code"],
+                        branch_label=branch_label,
+                        is_container=True,
+                        child_diffs=body_diffs
+                    ))
+                    
+                    matched_a.add(i)
+                    matched_b.add(j)
+                    break
+                
+                # Match else branches
+                elif (branch_a["branch_type"] == "else" and 
+                      branch_b["branch_type"] == "else"):
+                    
+                    # Compare else body statements
+                    body_diffs = self._compare_statement_lists_generic(
+                        branch_a["statements"], branch_b["statements"], source_a, source_b
+                    )
+                    
+                    if not body_diffs:
+                        change_type = StatementChangeType.UNCHANGED
+                        desc = "else block unchanged"
+                    else:
+                        change_type = StatementChangeType.MODIFIED
+                        desc = "else block modified"
+                    
+                    diffs.append(StatementDiff(
+                        change_type=change_type,
+                        code=branch_b["code"],
+                        node_type="else_branch",
+                        file_a_line=branch_a["start_line"],
+                        file_a_index=i,
+                        file_b_line=branch_b["start_line"],
+                        file_b_index=j,
+                        description=desc,
+                        old_code=branch_a["code"],
+                        branch_label="else",
+                        is_container=True,
+                        child_diffs=body_diffs
+                    ))
+                    
+                    matched_a.add(i)
+                    matched_b.add(j)
+                    break
+        
+        # Phase 2: Handle unmatched branches (added/deleted)
+        for i, branch_a in enumerate(branches_a):
+            if i not in matched_a:
+                # Deleted branch
+                branch_label = f"{branch_a['branch_type']}({branch_a['condition']})" if branch_a['condition'] else branch_a['branch_type']
+                diffs.append(StatementDiff(
+                    change_type=StatementChangeType.DELETED,
+                    code=branch_a["code"],
+                    node_type="if_branch" if branch_a["branch_type"] != "else" else "else_branch",
+                    file_a_line=branch_a["start_line"],
+                    file_a_index=i,
+                    description=f"{branch_a['branch_type']} ({branch_a['condition']}) deleted from position {i}" if branch_a['condition'] else f"{branch_a['branch_type']} deleted from position {i}",
+                    branch_label=branch_label,
+                    is_container=True
+                ))
+        
+        for j, branch_b in enumerate(branches_b):
+            if j not in matched_b:
+                # Added branch
+                branch_label = f"{branch_b['branch_type']}({branch_b['condition']})" if branch_b['condition'] else branch_b['branch_type']
+                diffs.append(StatementDiff(
+                    change_type=StatementChangeType.ADDED,
+                    code=branch_b["code"],
+                    node_type="if_branch" if branch_b["branch_type"] != "else" else "else_branch",
+                    file_b_line=branch_b["start_line"],
+                    file_b_index=j,
+                    description=f"{branch_b['branch_type']} ({branch_b['condition']}) added at position {j}" if branch_b['condition'] else f"{branch_b['branch_type']} added at position {j}",
+                    branch_label=branch_label,
+                    is_container=True
+                ))
+        
+        return diffs
+    
+    def _extract_if_branches(self, if_node, source: bytes) -> List[dict]:
+        """
+        Extract branches from an if_statement node.
+        
+        Returns a list of branch dictionaries with:
+        - branch_type: "if", "else_if", or "else"
+        - condition: the condition code (None for else)
+        - statements: list of statement nodes in the branch body
+        - start_line: starting line number
+        - code: full branch code
+        """
+        branches = []
+        
+        # Main if branch
+        condition_node = if_node.child_by_field_name("condition")
+        body_node = if_node.child_by_field_name("body")
+        
+        if condition_node and body_node:
+            condition_code = source[condition_node.start_byte:condition_node.end_byte].decode('utf-8', errors='replace')
+            body_statements = self._get_block_statements_from_node(body_node)
+            
+            branches.append({
+                "branch_type": "if",
+                "condition": condition_code,
+                "statements": body_statements,
+                "start_line": if_node.start_point[0] + 1,
+                "code": source[if_node.start_byte:body_node.end_byte].decode('utf-8', errors='replace')
+            })
+        
+        # Handle else/else if
+        else_body_node = if_node.child_by_field_name("else_body")
+        if else_body_node:
+            if else_body_node.type == "if_statement":
+                # This is an "else if" - recursively extract its branches
+                nested_branches = self._extract_if_branches(else_body_node, source)
+                for branch in nested_branches:
+                    if branch["branch_type"] == "if":
+                        branch["branch_type"] = "else_if"
+                    branches.extend([branch])
+            else:
+                # This is a plain "else"
+                else_statements = self._get_block_statements_from_node(else_body_node)
+                branches.append({
+                    "branch_type": "else",
+                    "condition": None,
+                    "statements": else_statements,
+                    "start_line": else_body_node.start_point[0] + 1,
+                    "code": source[else_body_node.start_byte:else_body_node.end_byte].decode('utf-8', errors='replace')
+                })
+        
+        return branches
+    
+    def _compare_statement_lists_generic(
+        self,
+        statements_a: List,
+        statements_b: List,
+        source_a: bytes,
+        source_b: bytes
+    ) -> List[StatementDiff]:
+        """
+        Generic method to compare two lists of statement nodes.
+        
+        This is used by the branch comparison to compare statements within
+        individual if/else if/else branches.
+        """
+        # Convert nodes to StatementSignature objects
+        sigs_a = []
+        for i, stmt in enumerate(statements_a):
+            code = source_a[stmt.start_byte:stmt.end_byte].decode('utf-8', errors='replace')
+            identifier = self._extract_statement_identifier(stmt, source_a) or self._extract_identifier(stmt, source_a) or f"anonymous_{stmt.type}"
+            
+            sigs_a.append(StatementSignature(
+                content_hash=hash_content(code),
+                code=code.strip(),
+                start_line=stmt.start_point[0] + 1,
+                end_line=stmt.end_point[0] + 1,
+                index=i,
+                node_type=stmt.type,
+                identifier=identifier
+            ))
+        
+        sigs_b = []
+        for i, stmt in enumerate(statements_b):
+            code = source_b[stmt.start_byte:stmt.end_byte].decode('utf-8', errors='replace')
+            identifier = self._extract_statement_identifier(stmt, source_b) or self._extract_identifier(stmt, source_b) or f"anonymous_{stmt.type}"
+            
+            sigs_b.append(StatementSignature(
+                content_hash=hash_content(code),
+                code=code.strip(),
+                start_line=stmt.start_point[0] + 1,
+                end_line=stmt.end_point[0] + 1,
+                index=i,
+                node_type=stmt.type,
+                identifier=identifier
+            ))
+        
+        # Use existing statement comparison logic
+        return self._compare_statement_lists(sigs_a, sigs_b, None, None, source_a, source_b)
+    
+    def _get_block_statements_from_node(self, block_node) -> List:
+        """Get statements from a block node."""
+        if block_node.type in {"block", "statement_block", "closure"}:
+            return list(block_node.named_children)
+        else:
+            # Single statement
+            return [block_node]
+    
+    def _extract_container_children(self, container_node, source: bytes) -> List[StatementSignature]:
+        """
+        GENERIC child extraction that works for ANY container type.
+        
+        This extracts direct children from:
+        - Classes → methods, fields, comments
+        - Functions → statements, nested blocks
+        - If/else → condition, then/else blocks  
+        - Loops → condition, body
+        - Try/catch → try block, catch blocks, finally
+        - Any other container
+        """
+        children = []
+        
+        # For classes, look inside the class body
+        if container_node.type in GROOVY_CLASS_TYPES:
+            body_node = self._find_class_body(container_node)
+            if body_node:
+                container_node = body_node
+        
+        # For functions, extract both signature components AND body statements
+        elif container_node.type in GROOVY_FUNCTION_TYPES:
+            # First, extract function signature components (return type, parameters)
+            for child in container_node.named_children:
+                if child.type in {'builtintype', 'parameter_list'}:
+                    code = source[child.start_byte:child.end_byte].decode('utf-8', errors='replace')
+                    
+                    # Create meaningful identifiers for signature components
+                    if child.type == 'builtintype':
+                        identifier = f"return_type_{code.strip()}"
+                    elif child.type == 'parameter_list':
+                        identifier = f"parameters_{hash_content(code)[:8]}"
+                    else:
+                        identifier = f"signature_{child.type}"
+                    
+                    child_sig = StatementSignature(
+                        content_hash=hash_content(code),
+                        code=code.strip(),
+                        start_line=child.start_point[0] + 1,
+                        end_line=child.end_point[0] + 1,
+                        index=len(children),
+                        node_type=child.type,
+                        identifier=identifier
+                    )
+                    children.append(child_sig)
+            
+            # Then, extract function body statements
+            body_node = self._find_function_body(container_node)
+            if body_node:
+                container_node = body_node
+            else:
+                # If no body found, we've already extracted signature components, so return
+                return children
+        
+        # Special handling for control flow containers (for, while, if, etc.)
+        if container_node.type in {"for_loop", "for_in_loop", "while_loop", "if_statement"}:
+            # For control flow, extract the body statements, not the structural wrapper
+            body_node = None
+            
+            # Find the body node
+            if container_node.type in {"for_loop", "for_in_loop", "while_loop"}:
+                body_node = container_node.child_by_field_name("body")
+            elif container_node.type == "if_statement":
+                # For if statements, get the body clause
+                body_node = container_node.child_by_field_name("body")
+            
+            if body_node and body_node.type == "closure":
+                # Extract statements from within the closure
+                # Use improved statement extraction for control flow containers
+                # This ensures proper detection of added/modified/deleted statements within loops/conditionals
+                
+                # Check if this closure has multiple distinct statements that should be analyzed separately
+                has_multiple_statements = len(body_node.named_children) > 1
+                has_control_flow_children = any(child.type in {"if_statement", "for_loop", "while_loop", "try_statement"} 
+                                              for child in body_node.named_children)
+                
+                # Use individual statement extraction if we have multiple statements or nested control flow
+                if has_multiple_statements or has_control_flow_children:
+                    for i, child in enumerate(body_node.named_children):
+                        code = source[child.start_byte:child.end_byte].decode('utf-8', errors='replace')
+                        identifier = self._extract_statement_identifier(child, source) or self._extract_identifier(child, source) or f"anonymous_{child.type}"
+                        
+                        child_sig = StatementSignature(
+                            content_hash=hash_content(code),
+                            code=code.strip(),
+                            start_line=child.start_point[0] + 1,
+                            end_line=child.end_point[0] + 1,
+                            index=len(children),
+                            node_type=child.type,
+                            identifier=identifier
+                        )
+                        children.append(child_sig)
+                else:
+                    # For simple single-statement closures, use the original grouping logic
+                    # This preserves backward compatibility for simple cases
+                    child = body_node.named_children[0]
+                    code = source[child.start_byte:child.end_byte].decode('utf-8', errors='replace')
+                    identifier = self._extract_statement_identifier(child, source) or self._extract_identifier(child, source) or f"anonymous_{child.type}"
+                    
+                    child_sig = StatementSignature(
+                        content_hash=hash_content(code),
+                        code=code.strip(),
+                        start_line=child.start_point[0] + 1,
+                        end_line=child.end_point[0] + 1,
+                        index=len(children),
+                        node_type=child.type,
+                        identifier=identifier
+                    )
+                    children.append(child_sig)
+                        
+                return children
+        
+        # Extract all direct children (statements, comments, nested containers)
+        for i, child in enumerate(container_node.named_children):
+            # Skip identifier nodes (function names are already captured at the function level)
+            if child.type in {'identifier'}:
+                continue
+                
+            # Skip structural closures - they should be handled by the special logic above
+            if child.type == "closure" and container_node.type in {"for_loop", "for_in_loop", "while_loop", "if_statement"}:
+                continue
+                
+            code = source[child.start_byte:child.end_byte].decode('utf-8', errors='replace')
+            
+            # For comments, use content hash as identifier
+            if child.type in {"comment", "line_comment", "block_comment"}:
+                identifier = hash_content(code)
+            else:
+                identifier = self._extract_identifier(child, source) or f"anonymous_{child.type}"
+            
+            child_sig = StatementSignature(
+                content_hash=hash_content(code),
+                code=code.strip(),
+                start_line=child.start_point[0] + 1,
+                end_line=child.end_point[0] + 1,
+                index=len(children),
+                node_type=child.type,
+                identifier=identifier
+            )
+            children.append(child_sig)
+        
+        return children
+    
+    def _is_container_node(self, node_type: str) -> bool:
+        """Check if a node type represents a container that can have children."""
+        # Never treat closures as containers in the main AST diff logic
+        # They are handled contextually in the recursive parser
+        if node_type in {"closure", "closure_expression"}:
+            return False
+        return node_type in GROOVY_CONTAINER_TYPES or node_type in GROOVY_FUNCTION_TYPES or node_type in GROOVY_CLASS_TYPES
+    
+    def _find_class_body(self, class_node):
+        """Find the body of a class (usually a closure or block)."""
+        for child in class_node.named_children:
+            if child.type in {'class_body', 'block', 'closure'}:
+                return child
+        return None
+    
+    def _find_function_body(self, function_node):
+        """Find the body of a function (usually a closure or block)."""
+        for child in function_node.named_children:
+            if child.type in {'closure', 'block', 'statement_block'}:
+                return child
+        return None
+    
+    def _find_child_node_by_line(self, parent_node, target_line: int):
+        """Find a child node that starts at the target line."""
+        for child in parent_node.named_children:
+            if child.start_point[0] + 1 == target_line:
+                return child
+        return None
+    
+    def _extract_and_compare_class_members(self, class_node_a, class_node_b, source_a: bytes, source_b: bytes) -> List[StatementDiff]:
+        """Fallback: Extract and compare class members using the old logic."""
+        try:
+            members_a = self._extract_class_member_signatures(class_node_a, source_a)
+            members_b = self._extract_class_member_signatures(class_node_b, source_b)
+            return self._compare_member_lists(members_a, members_b)
+        except Exception as e:
+            print(f"Warning: Class member comparison fallback failed: {e}")
+            return []
+    
+    def _extract_and_compare_function_statements(self, func_node_a, func_node_b, source_a: bytes, source_b: bytes) -> List[StatementDiff]:
+        """Fallback: Extract and compare function statements using the old logic."""
+        try:
+            return self._compare_function_statements_direct(func_node_a, func_node_b, source_a, source_b)
+        except Exception as e:
+            print(f"Warning: Function statement comparison fallback failed: {e}")
+            return []
     
     def _find_node_at_line(self, root_node, target_line: int):
         """Find the AST node that starts at the target line."""
@@ -671,7 +1435,7 @@ class GroovyASTDiff:
             return self._compare_member_lists(members_a, members_b)
             
         except Exception as e:
-            print(f"Warning: Class member comparison failed: {e}")
+            print(f"Warning: Class member comparison failed for {class_a.identifier}: {e}")
             return self._simple_block_comparison(class_a, class_b)
     
     def _extract_class_member_signatures(self, class_node, source: bytes) -> List[StatementSignature]:
@@ -684,10 +1448,20 @@ class GroovyASTDiff:
                 # Check if it's a class body that contains the actual members
                 if child.type in {'class_body', 'block', 'closure'}:
                     for member_child in child.named_children:
-                        if member_child.type in GROOVY_FUNCTION_TYPES or member_child.type in GROOVY_FIELD_TYPES:
+                        # Extract members (functions, fields) and comments
+                        if (member_child.type in GROOVY_FUNCTION_TYPES or 
+                            member_child.type in GROOVY_FIELD_TYPES or
+                            member_child.type in {"comment", "line_comment", "block_comment"}):
+                            
                             # Extract member info
                             code = source[member_child.start_byte:member_child.end_byte].decode('utf-8', errors='replace')
-                            identifier = self._extract_identifier(member_child, source) or f"anonymous_{member_child.type}"
+                            
+                            # For comments, use content hash as identifier (like top-level comments)
+                            if member_child.type in {"comment", "line_comment", "block_comment"}:
+                                identifier = hash_content(code)
+                            else:
+                                identifier = self._extract_identifier(member_child, source) or f"anonymous_{member_child.type}"
+                            
                             content_hash = hash_content(code)
                             
                             member = StatementSignature(
@@ -762,14 +1536,26 @@ class GroovyASTDiff:
                     continue
                 
                 similarity = calculate_similarity(member_a.code, member_b.code)
-                if similarity > best_similarity and similarity >= 0.3:  # 30% threshold
+                # Use higher threshold for comments (70%) as they need stronger similarity
+                threshold = 0.7 if member_a.node_type in {"comment", "line_comment", "block_comment"} else 0.6
+                if similarity > best_similarity and similarity >= threshold:
                     best_similarity = similarity
                     best_match = member_b
                     best_j = j
             
             if best_match:
+                is_container = best_match.node_type in GROOVY_FUNCTION_TYPES
+                
+                # Determine if it's moved and modified or just modified
+                if i != best_j:
+                    change_type = StatementChangeType.MOVED_MODIFIED
+                    description = f"Statement moved and modified: {best_match.node_type} from position {i+1} to {best_j+1} ({best_similarity:.1%} similar)"
+                else:
+                    change_type = StatementChangeType.MODIFIED
+                    description = f"Statement modified: {best_match.node_type} ({best_similarity:.1%} similar)"
+                
                 diff = StatementDiff(
-                    change_type=StatementChangeType.MODIFIED,
+                    change_type=change_type,
                     code=best_match.code,
                     node_type=best_match.node_type,
                     file_a_line=member_a.start_line,
@@ -778,9 +1564,23 @@ class GroovyASTDiff:
                     file_b_index=best_j,
                     old_code=member_a.code,
                     similarity_score=best_similarity,
-                    description=f"Statement modified: {best_match.node_type} ({best_similarity:.1%} similar)",
-                    is_container=best_match.node_type in GROOVY_FUNCTION_TYPES
+                    description=description,
+                    is_container=is_container
                 )
+                
+                # For container statements, populate child_diffs using recursive parser
+                # Don't generate child diffs for closures at all - they cause infinite recursion
+                # The for loop, if, while etc. analysis should happen at the statement level
+                if is_container and best_match.node_type not in {"closure", "closure_expression"}:
+                    try:
+                        child_diffs = self._generate_child_diffs_for_members(member_a, best_match)
+                        diff.child_diffs = child_diffs
+                    except Exception as e:
+                        print(f"Warning: Failed to generate child diffs for {best_match.node_type}: {e}")
+                        diff.child_diffs = []
+                else:
+                    diff.child_diffs = []
+                
                 diffs.append(diff)
                 matched_a.add(i)
                 matched_b.add(best_j)
@@ -814,13 +1614,169 @@ class GroovyASTDiff:
         
         return diffs
     
+    def _generate_child_diffs_for_members(self, member_a: StatementSignature, member_b: StatementSignature) -> List[StatementDiff]:
+        """
+        Generate child diffs for container statements (like function_definition) using recursive parser.
+        
+        This analyzes what changed inside the container (method parameters, body statements, etc.)
+        """
+        try:
+            # Parse both member codes as individual units
+            member_a_code = member_a.code.encode('utf-8')
+            member_b_code = member_b.code.encode('utf-8')
+            
+            tree_a = self.parser.parse(member_a_code)
+            tree_b = self.parser.parse(member_b_code)
+            
+            if not tree_a.root_node.children or not tree_b.root_node.children:
+                return []
+            
+            # Get the function/container nodes
+            node_a = tree_a.root_node.children[0]
+            node_b = tree_b.root_node.children[0]
+            
+            # For function definitions, we want to compare the children (body contents), not the function itself
+            if node_a.type in GROOVY_FUNCTION_TYPES and node_b.type in GROOVY_FUNCTION_TYPES:
+                return self._compare_function_body_contents(node_a, node_b, member_a_code, member_b_code, member_a, member_b)
+            
+            # For other containers, use the recursive parser
+            sig_a = self.recursive_parser.parse_recursive(node_a, member_a_code)
+            sig_b = self.recursive_parser.parse_recursive(node_b, member_b_code)
+            
+            # Get the children and compare them directly
+            if sig_a.children and sig_b.children:
+                return self.recursive_parser._compare_container_children(sig_a, sig_b)
+            
+            return []
+            
+        except Exception as e:
+            print(f"Warning: Failed to generate child diffs: {e}")
+            return []
+    
+    def _compare_function_body_contents(self, node_a, node_b, source_a: bytes, source_b: bytes, member_a: StatementSignature, member_b: StatementSignature) -> List[StatementDiff]:
+        """
+        Compare the contents of two function bodies to generate child diffs.
+        
+        This extracts the body statements and compares them directly.
+        """
+        try:
+            # Extract function body children
+            children_a = self._extract_function_body_children(node_a)
+            children_b = self._extract_function_body_children(node_b)
+            
+            if not children_a and not children_b:
+                return []
+            
+            # Create signatures for the body children
+            sigs_a = []
+            for child in children_a:
+                sig = self.recursive_parser.parse_recursive(child, source_a)
+                # Adjust line numbers to be relative to the original file
+                sig.start_line = member_a.start_line + (sig.start_line - 1)
+                sig.end_line = member_a.start_line + (sig.end_line - 1)
+                sigs_a.append(sig)
+            
+            sigs_b = []
+            for child in children_b:
+                sig = self.recursive_parser.parse_recursive(child, source_b)
+                # Adjust line numbers to be relative to the original file
+                sig.start_line = member_b.start_line + (sig.start_line - 1)
+                sig.end_line = member_b.start_line + (sig.end_line - 1)
+                sigs_b.append(sig)
+            
+            # Compare the body children using the container comparison logic
+            return self._compare_function_body_signatures(sigs_a, sigs_b)
+            
+        except Exception as e:
+            print(f"Warning: Failed to compare function body contents: {e}")
+            return []
+    
+    def _extract_function_body_children(self, function_node):
+        """Extract the children from a function's body."""
+        children = []
+        
+        # Look for the function body (usually a closure or block)
+        for child in function_node.named_children:
+            if child.type in {'closure', 'block', 'statement_block'}:
+                # Return the children of the body
+                return child.named_children
+        
+        return children
+    
+    def _compare_function_body_signatures(self, sigs_a: List, sigs_b: List) -> List[StatementDiff]:
+        """Compare function body signatures using multi-phase matching."""
+        diffs = []
+        matched_a = set()
+        matched_b = set()
+        
+        # Phase 1: Match by content hash (exact matches)
+        for i, sig_a in enumerate(sigs_a):
+            for j, sig_b in enumerate(sigs_b):
+                if (i not in matched_a and j not in matched_b and
+                    sig_a.content_hash == sig_b.content_hash):
+                    
+                    # Recursively compare matched children
+                    child_diffs = self.recursive_parser.compare_recursive_statements(sig_a, sig_b)
+                    diffs.extend(child_diffs)
+                    
+                    matched_a.add(i)
+                    matched_b.add(j)
+                    break
+        
+        # Phase 2: Match by similarity (for modified statements)
+        for i, sig_a in enumerate(sigs_a):
+            if i in matched_a:
+                continue
+            
+            for j, sig_b in enumerate(sigs_b):
+                if j in matched_b:
+                    continue
+                
+                if (sig_a.node_type == sig_b.node_type and
+                    self.recursive_parser._calculate_similarity(sig_a.code, sig_b.code) >= 0.6):
+                    
+                    # Recursively compare similar children
+                    child_diffs = self.recursive_parser.compare_recursive_statements(sig_a, sig_b)
+                    diffs.extend(child_diffs)
+                    
+                    matched_a.add(i)
+                    matched_b.add(j)
+                    break
+        
+        # Phase 3: Remaining unmatched children (added/deleted)
+        for i, sig_a in enumerate(sigs_a):
+            if i not in matched_a:
+                diff = StatementDiff(
+                    change_type=StatementChangeType.DELETED,
+                    code=sig_a.code,
+                    node_type=sig_a.node_type,
+                    file_a_line=sig_a.start_line,
+                    description=f"Deleted {sig_a.node_type}",
+                    is_container=sig_a.is_container
+                )
+                diffs.append(diff)
+        
+        for j, sig_b in enumerate(sigs_b):
+            if j not in matched_b:
+                diff = StatementDiff(
+                    change_type=StatementChangeType.ADDED,
+                    code=sig_b.code,
+                    node_type=sig_b.node_type,
+                    file_b_line=sig_b.start_line,
+                    description=f"Added {sig_b.node_type}",
+                    is_container=sig_b.is_container
+                )
+                diffs.append(diff)
+        
+        return diffs
+    
     def _compare_function_statements_direct(self, node_a: Node, node_b: Node, source_a: bytes, source_b: bytes) -> List[StatementDiff]:
         """Compare individual statements within function bodies directly."""
         # Extract function body statements
         statements_a = self._extract_function_body_statements(node_a, source_a)
         statements_b = self._extract_function_body_statements(node_b, source_b)
         
-        return self._compare_statement_lists(statements_a, statements_b)
+        return self._compare_statement_lists(statements_a, statements_b, node_a, node_b, source_a, source_b)
     
     def _extract_function_body_statements(self, function_node: Node, source: bytes) -> List[StatementSignature]:
         """Extract individual statements from a function body."""
@@ -882,11 +1838,19 @@ class GroovyASTDiff:
                     for grandchild in child.named_children:
                         if grandchild.type == "identifier":
                             return source[grandchild.start_byte:grandchild.end_byte].decode('utf-8', errors='replace')
-                elif child.type == "method_invocation":
-                    # Look for method name
+                elif child.type in {"method_invocation", "juxt_function_call"}:
+                    # Look for method name (handle both method_invocation and juxt_function_call like println)
                     for grandchild in child.named_children:
                         if grandchild.type == "identifier":
                             return source[grandchild.start_byte:grandchild.end_byte].decode('utf-8', errors='replace')
+                    # For juxt_function_call, the first child might be the function name directly
+                    if child.type == "juxt_function_call" and child.named_children:
+                        first_child = child.named_children[0]
+                        if first_child.type == "identifier":
+                            return source[first_child.start_byte:first_child.end_byte].decode('utf-8', errors='replace')
+                # Handle direct function calls (like println) that might not be wrapped in method_invocation
+                elif child.type == "identifier":
+                    return source[child.start_byte:child.end_byte].decode('utf-8', errors='replace')
         
         return None
     
@@ -969,7 +1933,9 @@ class GroovyASTDiff:
         # Different families
         return False
     
-    def _compare_statement_lists(self, statements_a: List[StatementSignature], statements_b: List[StatementSignature]) -> List[StatementDiff]:
+    def _compare_statement_lists(self, statements_a: List[StatementSignature], statements_b: List[StatementSignature], 
+                                container_node_a: Node = None, container_node_b: Node = None, 
+                                source_a: bytes = None, source_b: bytes = None) -> List[StatementDiff]:
         """Compare two lists of statements and return diffs with relative positioning analysis."""
         diffs = []
         matched_a = set()
@@ -1000,6 +1966,84 @@ class GroovyASTDiff:
                     matched_a.add(i)
                     matched_b.add(j)
                     break
+        
+        # Phase 1.5: Match by identifier OR by semantic role (for function signatures)
+        for i, stmt_a in enumerate(statements_a):
+            if i in matched_a:
+                continue
+            for j, stmt_b in enumerate(statements_b):
+                if j not in matched_b and stmt_a.node_type == stmt_b.node_type:
+                    
+                    # Check for identifier match (normal case)
+                    identifier_match = (stmt_a.identifier and stmt_b.identifier and 
+                                      stmt_a.identifier == stmt_b.identifier)
+                    
+                    # Check for semantic role match (function signature components)
+                    semantic_match = (stmt_a.node_type in {'builtintype', 'parameter_list'} and
+                                    stmt_b.node_type in {'builtintype', 'parameter_list'} and
+                                    stmt_a.node_type == stmt_b.node_type)
+                    
+                    if identifier_match or semantic_match:
+                        
+                        similarity = calculate_similarity(stmt_a.code, stmt_b.code)
+                        
+                        # Determine if it's moved and modified or just modified
+                        if i != j:
+                            change_type = StatementChangeType.MOVED_MODIFIED
+                            description = f"Statement moved and modified: {stmt_b.node_type} '{stmt_b.identifier}' from position {i+1} to {j+1} ({similarity:.1%} similar)"
+                        else:
+                            change_type = StatementChangeType.MODIFIED
+                            description = f"Statement modified: {stmt_b.node_type} '{stmt_b.identifier}' ({similarity:.1%} similar)"
+                        
+                        is_container = stmt_b.node_type in GROOVY_CONTAINER_TYPES
+                        
+                        diff = StatementDiff(
+                            change_type=change_type,
+                            code=stmt_b.code,
+                            node_type=stmt_b.node_type,
+                            file_a_line=stmt_a.start_line,
+                            file_a_index=i,
+                            file_b_line=stmt_b.start_line,
+                            file_b_index=j,
+                            old_code=stmt_a.code,
+                            similarity_score=similarity,
+                            description=description,
+                            is_container=is_container
+                        )
+                        
+                        # For container statements, generate child diffs recursively
+                        # Skip closures to avoid infinite recursion
+                        if is_container and stmt_b.node_type not in {"closure", "closure_expression"} and container_node_a and container_node_b and source_a and source_b:
+                            try:
+                                # Find the actual AST nodes for these statements
+                                node_a = self._find_node_at_line(container_node_a, stmt_a.start_line)
+                                node_b = self._find_node_at_line(container_node_b, stmt_b.start_line)
+                                
+                                if node_a and node_b:
+                                    # Special handling for if_statement nodes - use branch-aware analysis
+                                    if node_a.type == "if_statement" and node_b.type == "if_statement":
+                                        diff.child_diffs = self._compare_if_statement_branches(node_a, node_b, source_a, source_b)
+                                    else:
+                                        # Extract children from both nodes and compare recursively
+                                        children_a = self._extract_container_children(node_a, source_a)
+                                        children_b = self._extract_container_children(node_b, source_b)
+                                        
+                                        # Recursively compare the children
+                                        diff.child_diffs = self._compare_statement_lists(
+                                            children_a, children_b, node_a, node_b, source_a, source_b
+                                        )
+                                else:
+                                    diff.child_diffs = []
+                            except Exception as e:
+                                print(f"Warning: Failed to generate child diffs for {stmt_b.node_type}: {e}")
+                                diff.child_diffs = []
+                        else:
+                            diff.child_diffs = []
+                        
+                        diffs.append(diff)
+                        matched_a.add(i)
+                        matched_b.add(j)
+                        break
         
         # Phase 2: Similar statements (modified or moved_modified)
         for i, stmt_a in enumerate(statements_a):
@@ -1110,6 +2154,7 @@ class GroovyASTDiff:
             blocks_deleted=0,
             blocks_modified=0,
             blocks_moved=0,
+            blocks_moved_modified=0,
             blocks_unchanged=0,
             diffs=[],
             error=error_message
@@ -1141,11 +2186,12 @@ def format_output(result: ComparisonResult) -> str:
     # Change statistics
     output.append("CHANGE STATISTICS:")
     output.append("-" * 40)
-    output.append(f"  Added:     {result.blocks_added}")
-    output.append(f"  Deleted:   {result.blocks_deleted}")
-    output.append(f"  Modified:  {result.blocks_modified}")
-    output.append(f"  Moved:     {result.blocks_moved}")
-    output.append(f"  Unchanged: {result.blocks_unchanged}")
+    output.append(f"  Added:         {result.blocks_added}")
+    output.append(f"  Deleted:       {result.blocks_deleted}")
+    output.append(f"  Modified:      {result.blocks_modified}")
+    output.append(f"  Moved:         {result.blocks_moved}")
+    output.append(f"  Moved-Modified: {result.blocks_moved_modified}")
+    output.append(f"  Unchanged:     {result.blocks_unchanged}")
     output.append("")
     
     # Detailed changes
@@ -1247,6 +2293,7 @@ def _create_json_result(result: ComparisonResult) -> dict:
             'blocks_deleted': 0,
             'blocks_modified': 0,
             'blocks_moved': 0,
+            'blocks_moved_modified': 0,
             'blocks_unchanged': result.blocks_unchanged,
             'file_a_path': result.file_a_path,
             'file_b_path': result.file_b_path,
@@ -1277,7 +2324,7 @@ def _create_json_result(result: ComparisonResult) -> dict:
         
         # Add statement diffs if available
         if diff.statement_diffs:
-            diff_obj['statement_diffs'] = _convert_statement_diffs_to_json(diff.statement_diffs)
+            diff_obj['statement_diffs'] = _convert_statement_diffs_to_json(diff.statement_diffs, depth=0, visited=set())
         
         differences.append(diff_obj)
     
@@ -1297,6 +2344,7 @@ def _create_json_result(result: ComparisonResult) -> dict:
         'blocks_deleted': result.blocks_deleted,
         'blocks_modified': result.blocks_modified,
         'blocks_moved': result.blocks_moved,
+        'blocks_moved_modified': result.blocks_moved_modified,
         'blocks_unchanged': result.blocks_unchanged,
         'file_a_path': result.file_a_path,
         'file_b_path': result.file_b_path,
@@ -1305,11 +2353,25 @@ def _create_json_result(result: ComparisonResult) -> dict:
     }
 
 
-def _convert_statement_diffs_to_json(statement_diffs: List[StatementDiff]) -> List[dict]:
-    """Convert statement diffs to JSON format matching JavaScript POC."""
+def _convert_statement_diffs_to_json(statement_diffs: List[StatementDiff], depth: int = 0, max_depth: int = 15, visited: Optional[Set] = None) -> List[dict]:
+    """Convert statement diffs to JSON format matching JavaScript POC with recursion protection."""
+    if visited is None:
+        visited = set()
+    
     json_diffs = []
     
+    # Prevent infinite recursion in JSON serialization
+    if depth > max_depth:
+        return [{"error": f"Maximum nesting depth ({max_depth}) exceeded", "truncated": True}]
+    
     for i, stmt_diff in enumerate(statement_diffs):
+        # Check for circular references
+        stmt_id = id(stmt_diff)
+        if stmt_id in visited:
+            json_diffs.append({"error": "Circular reference detected", "node_type": stmt_diff.node_type})
+            continue
+        visited.add(stmt_id)
+        
         stmt_obj = {
             'change_type': stmt_diff.change_type.value,
             'code': stmt_diff.code,
@@ -1325,11 +2387,14 @@ def _convert_statement_diffs_to_json(statement_diffs: List[StatementDiff]) -> Li
             'branch_label': stmt_diff.branch_label
         }
         
-        # Add child diffs if available
-        if stmt_diff.child_diffs:
-            stmt_obj['child_diffs'] = _convert_statement_diffs_to_json(stmt_diff.child_diffs)
+        # Add child diffs if available (with recursion protection)
+        if stmt_diff.child_diffs and depth < max_depth:
+            stmt_obj['child_diffs'] = _convert_statement_diffs_to_json(stmt_diff.child_diffs, depth + 1, max_depth, visited.copy())
         else:
             stmt_obj['child_diffs'] = []
+        
+        # Remove from visited set after processing
+        visited.discard(stmt_id)
         
         json_diffs.append(stmt_obj)
     
@@ -1341,15 +2406,15 @@ def main():
     parser = argparse.ArgumentParser(
         description="Compare two Groovy files using AST analysis",
         epilog="""
-This tool follows the JavaScript AST Diff POC approach:
-- Block-level classification (classes, methods, fields, etc.)
-- Multi-phase matching strategy (identifier, content hash, structural similarity)
-- Hierarchical diff structure with statement-level comparison
-- Rich similarity scoring and change type detection
+            This tool follows the JavaScript AST Diff POC approach:
+            - Block-level classification (classes, methods, fields, etc.)
+            - Multi-phase matching strategy (identifier, content hash, structural similarity)
+            - Hierarchical diff structure with statement-level comparison
+            - Rich similarity scoring and change type detection
 
-Structural Similarity:
-  Calculated using Sørensen-Dice coefficient: (2 * common_elements) / (total_elements)
-  Common elements include unchanged blocks and moved blocks (same content, different position)
+            Structural Similarity:
+            Calculated using Sørensen-Dice coefficient: (2 * common_elements) / (total_elements)
+            Common elements include unchanged blocks and moved blocks (same content, different position)
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -1402,6 +2467,7 @@ Structural Similarity:
         print(f"  Deleted: {result.blocks_deleted}")
         print(f"  Modified: {result.blocks_modified}")
         print(f"  Moved: {result.blocks_moved}")
+        print(f"  Moved-Modified: {result.blocks_moved_modified}")
         print(f"  Unchanged: {result.blocks_unchanged}")
         print(f"  Similarity: {result.structural_similarity:.1%}")
         

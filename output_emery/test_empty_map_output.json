@@ -1,0 +1,16 @@
+{
+  "is_identical": true,
+  "structural_similarity": 1.0,
+  "total_blocks_a": 2,
+  "total_blocks_b": 2,
+  "blocks_added": 0,
+  "blocks_deleted": 0,
+  "blocks_modified": 0,
+  "blocks_moved": 0,
+  "blocks_moved_modified": 0,
+  "blocks_unchanged": 2,
+  "file_a_path": "test-emery-samples/test_empty_map.groovy",
+  "file_b_path": "test-emery-samples/test_empty_map.groovy",
+  "diffs": [],
+  "message": "Files are identical - no differences found"
+}

@@ -1,5 +1,16 @@
-int value = 0
+// write function that prints "Hello, World!"
+void printHelloWorld() {
+    println "Hello, World!"
+}
+// write for loop
+for (int i = 0; i < 10; i++) {
+    printHelloWorld()
 
-void add(int number) {
-    value += number
+    while (i < 10) {
+        printHelloWorld()
+
+        if (i == 5) {
+            printHelloWorld()
+        }
+    }
 }

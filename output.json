@@ -1,0 +1,80 @@
+{
+  "is_identical": false,
+  "structural_similarity": 0.75,
+  "total_blocks_a": 4,
+  "total_blocks_b": 4,
+  "blocks_added": 0,
+  "blocks_deleted": 0,
+  "blocks_modified": 1,
+  "blocks_moved": 0,
+  "blocks_moved_modified": 0,
+  "blocks_unchanged": 3,
+  "file_a_path": "test_samples/added_before.groovy",
+  "file_b_path": "test_samples/added_after.groovy",
+  "differences": [
+    {
+      "change_type": "modified",
+      "block_type": "statement",
+      "identifier": "8d9e2ead2c424c0a",
+      "file_a_start_line": 6,
+      "file_a_end_line": 16,
+      "file_a_code": "for (int i = 0; i < 10; i++) {\n    printHelloWorld()\n\n    while (i < 10) {\n        printHelloWorld()\n\n        if (i == 5) {\n            printHelloWorld()\n        }\n    }\n}",
+      "file_b_start_line": 6,
+      "file_b_end_line": 16,
+      "file_b_code": "for (int i = 0; i < 5; i++) {\n    printHelloWorld()\n\n    while (i < 6) {\n        printHelloWorld()\n\n        if (i == 6) {\n            printHelloWorld()\n        }\n    }\n}",
+      "similarity_score": 93.33333333333333,
+      "description": "Modified statement '35b44c52ff4f4f24' \u2192 '8d9e2ead2c424c0a' (93.3% similar)",
+      "modifiers": [],
+      "statement_diffs": [
+        {
+          "change_type": "modified",
+          "code": "while (i < 6) {\n        printHelloWorld()\n\n        if (i == 6) {\n            printHelloWorld()\n        }\n    }",
+          "node_type": "while_loop",
+          "file_a_line": 9,
+          "file_a_index": 1,
+          "file_b_line": 9,
+          "file_b_index": 1,
+          "description": "Statement modified: while_loop 'anonymous_while_loop' (91.6% similar)",
+          "old_code": "while (i < 10) {\n        printHelloWorld()\n\n        if (i == 5) {\n            printHelloWorld()\n        }\n    }",
+          "similarity_score": 0.9156626506024096,
+          "is_container": true,
+          "branch_label": null,
+          "child_diffs": [
+            {
+              "change_type": "modified",
+              "code": "if (i == 6) {\n            printHelloWorld()\n        }",
+              "node_type": "if_statement",
+              "file_a_line": 12,
+              "file_a_index": 1,
+              "file_b_line": 12,
+              "file_b_index": 1,
+              "description": "Statement modified: if_statement 'if' (93.5% similar)",
+              "old_code": "if (i == 5) {\n            printHelloWorld()\n        }",
+              "similarity_score": 0.9354838709677419,
+              "is_container": true,
+              "branch_label": null,
+              "child_diffs": [
+                {
+                  "change_type": "modified",
+                  "code": "(i == 6)",
+                  "node_type": "parenthesized_expression",
+                  "file_a_line": 12,
+                  "file_a_index": 0,
+                  "file_b_line": 12,
+                  "file_b_index": 0,
+                  "description": "Statement modified: parenthesized_expression 'anonymous_parenthesized_expression' (71.4% similar)",
+                  "old_code": "(i == 5)",
+                  "similarity_score": 0.7142857142857143,
+                  "is_container": false,
+                  "branch_label": null,
+                  "child_diffs": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "message": "Detected 1 change(s). Similarity: 75.0%"
+}

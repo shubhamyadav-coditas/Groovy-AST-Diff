@@ -50,6 +50,7 @@ class StatementSignature:
     end_line: int
     index: int                         # Position index within the block
     node_type: str                     # AST node type
+    identifier: Optional[str] = None   # Statement identifier (function name, variable name, etc.)
 
 
 @dataclass
@@ -123,6 +124,7 @@ class ComparisonResult:
     blocks_deleted: int
     blocks_modified: int
     blocks_moved: int
+    blocks_moved_modified: int
     blocks_unchanged: int
     # Detailed diffs
     diffs: List[BlockDiff]

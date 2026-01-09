@@ -1,0 +1,139 @@
+{
+  "is_identical": false,
+  "structural_similarity": 0.0,
+  "total_blocks_a": 3,
+  "total_blocks_b": 4,
+  "blocks_added": 1,
+  "blocks_deleted": 0,
+  "blocks_modified": 0,
+  "blocks_moved": 0,
+  "blocks_moved_modified": 3,
+  "blocks_unchanged": 0,
+  "file_a_path": "test-samples/expression_before.groovy",
+  "file_b_path": "test-samples/expression_after.groovy",
+  "differences": [
+    {
+      "change_type": "moved_modified",
+      "block_type": "function_call",
+      "identifier": "println",
+      "file_a_start_line": 1,
+      "file_a_end_line": 1,
+      "file_a_code": "println \"Starting application\"",
+      "file_b_start_line": 3,
+      "file_b_end_line": 3,
+      "file_b_code": "println \"Application started successfully\"",
+      "similarity_score": 60.60606060606061,
+      "description": "Moved and modified function_call 'println' from position 1 to 2 (60.6% similar)",
+      "modifiers": [],
+      "statement_diffs": [
+        {
+          "change_type": "modified",
+          "code": "\"Application started successfully\"",
+          "node_type": "argument_list",
+          "file_a_line": 1,
+          "file_a_index": 0,
+          "file_b_line": 3,
+          "file_b_index": 0,
+          "description": "Statement modified: argument_list 'anonymous_argument_list' (46.2% similar)",
+          "old_code": "\"Starting application\"",
+          "similarity_score": 0.46153846153846156,
+          "is_container": false,
+          "branch_label": null,
+          "child_diffs": []
+        }
+      ]
+    },
+    {
+      "change_type": "moved_modified",
+      "block_type": "declaration",
+      "identifier": "result",
+      "file_a_start_line": 3,
+      "file_a_end_line": 3,
+      "file_a_code": "def result = 10 + 20",
+      "file_b_start_line": 5,
+      "file_b_end_line": 5,
+      "file_b_code": "def result = 15 + 25",
+      "similarity_score": 84.21052631578947,
+      "description": "Moved and modified declaration 'result' from position 2 to 3 (84.2% similar)",
+      "modifiers": [],
+      "statement_diffs": [
+        {
+          "change_type": "modified",
+          "code": "15 + 25",
+          "node_type": "binary_op",
+          "file_a_line": 3,
+          "file_a_index": 0,
+          "file_b_line": 5,
+          "file_b_index": 0,
+          "description": "Statement modified: binary_op 'anonymous_binary_op' (50.0% similar)",
+          "old_code": "10 + 20",
+          "similarity_score": 0.5,
+          "is_container": false,
+          "branch_label": null,
+          "child_diffs": []
+        }
+      ]
+    },
+    {
+      "change_type": "moved_modified",
+      "block_type": "expression",
+      "identifier": "9f31ffaf41632c5f",
+      "file_a_start_line": 5,
+      "file_a_end_line": 5,
+      "file_a_code": "Math.max(5, 10)",
+      "file_b_start_line": 1,
+      "file_b_end_line": 1,
+      "file_b_code": "Math.min(5, 11)",
+      "similarity_score": 64.28571428571429,
+      "description": "Moved and modified expression '6243a2b74af8889e' \u2192 '9f31ffaf41632c5f' from position 3 to 1 (64.3% similar)",
+      "modifiers": [],
+      "statement_diffs": [
+        {
+          "change_type": "modified",
+          "code": "Math.min",
+          "node_type": "dotted_identifier",
+          "file_a_line": 5,
+          "file_a_index": 0,
+          "file_b_line": 1,
+          "file_b_index": 0,
+          "description": "Statement modified: dotted_identifier 'Math' (71.4% similar)",
+          "old_code": "Math.max",
+          "similarity_score": 0.7142857142857143,
+          "is_container": false,
+          "branch_label": null,
+          "child_diffs": []
+        },
+        {
+          "change_type": "modified",
+          "code": "(5, 11)",
+          "node_type": "argument_list",
+          "file_a_line": 5,
+          "file_a_index": 1,
+          "file_b_line": 1,
+          "file_b_index": 1,
+          "description": "Statement modified: argument_list 'anonymous_argument_list' (66.7% similar)",
+          "old_code": "(5, 10)",
+          "similarity_score": 0.6666666666666666,
+          "is_container": false,
+          "branch_label": null,
+          "child_diffs": []
+        }
+      ]
+    },
+    {
+      "change_type": "added",
+      "block_type": "expression",
+      "identifier": "209b7f473b214bdb",
+      "file_a_start_line": null,
+      "file_a_end_line": null,
+      "file_a_code": null,
+      "file_b_start_line": 7,
+      "file_b_end_line": 7,
+      "file_b_code": "System.currentTimeMillis()",
+      "similarity_score": 0.0,
+      "description": "Added expression '209b7f473b214bdb'",
+      "modifiers": []
+    }
+  ],
+  "message": "Detected 4 change(s). Similarity: 0.0%"
+}

@@ -19,21 +19,22 @@ from groovy_domain import StatementSignature, StatementDiff
 
 # Groovy container types that need recursive parsing
 GROOVY_RECURSIVE_CONTAINERS = {
-    # Control flow containers
+    # Control flow containers (CORRECTED node types)
     "if_statement",
     "else_clause", 
     "switch_statement",
-    "switch_case",
+    "switch_block",      # NEW: container for switch cases
+    "case",              # NEW: switch case container (was switch_case)
     "switch_default",
     "try_statement",
     "catch_clause",
     "finally_clause",
     
-    # Loop containers
-    "for_statement",
-    "for_in_statement", 
-    "while_statement",
-    "do_while_statement",
+    # Loop containers (CORRECTED node types)
+    "for_loop",           # FIXED: was for_statement
+    "for_in_loop",       # FIXED: was for_in_statement
+    "while_loop",        # FIXED: was while_statement
+    "do_while_statement", # Keep this for completeness
     
     # Block containers
     "block",
@@ -45,10 +46,17 @@ GROOVY_RECURSIVE_CONTAINERS = {
     "constructor_definition",
     "class_definition",
     "interface_definition",
+    "trait_definition",
+    "enum_definition",
+    "annotation_definition",
     
-    # Groovy-specific containers
-    "closure",
-    "closure_expression",
+    # Groovy-specific containers (context-aware handling)
+    "closure",           # Now handled contextually - structural blocks are containers
+    "closure_expression", # Real closures are treated as pure statements
+    
+    # Additional Groovy containers
+    "synchronized_statement",
+    "labeled_statement",
 }
 
 # Pure statement types (leaf nodes) - stop recursion here
@@ -64,6 +72,8 @@ GROOVY_LEAF_STATEMENTS = {
     "variable_declaration",
     "field_declaration",
     "empty_statement",
+    "declaration" # declaration is a pure statement in groovy grammar
+    # NOTE: closures are now handled contextually in parse_recursive method
 }
 
 
@@ -118,7 +128,8 @@ class GroovyRecursiveParser:
         source: bytes,
         depth: int = 0,
         parent_hash: Optional[str] = None,
-        path: str = ""
+        path: str = "",
+        max_depth: int = 10  # Add recursion depth protection
     ) -> RecursiveNodeSignature:
         """
         Recursively parse a node and all its children until pure statements.
@@ -133,14 +144,95 @@ class GroovyRecursiveParser:
         Returns:
             RecursiveNodeSignature for this node and all descendants
         """
+        # 0. Check recursion depth to prevent infinite loops
+        if depth > max_depth:
+            # Create a simple signature for deeply nested nodes
+            code = source[node.start_byte:node.end_byte].decode('utf-8', errors='replace')
+            content_hash = self._hash_content(code)
+            return RecursiveNodeSignature(
+                node_type=node.type,
+                identifier=None,
+                content_hash=content_hash,
+                structure_hash=content_hash,
+                body_hash=None,
+                start_line=node.start_point[0] + 1,
+                end_line=node.end_point[0] + 1,
+                depth=depth,
+                parent_hash=parent_hash,
+                path=f"{path}/{node.type}:MAX_DEPTH",
+                children=[],
+                is_pure_statement=True,  # Treat as pure to stop recursion
+                is_container=False,
+                code=code[:100] + "..." if len(code) > 100 else code,
+            )
+
         # 1. Get node content and compute content hash
         code = source[node.start_byte:node.end_byte].decode('utf-8', errors='replace')
         content_hash = self._hash_content(code)
         
-        # 2. Determine node category
+        # 2. Determine node category (with special handling for closures)
         node_type = node.type
-        is_pure = node_type in GROOVY_LEAF_STATEMENTS
-        is_container = node_type in GROOVY_RECURSIVE_CONTAINERS
+        
+        # Special handling for closures - check if it's a real closure or structural block
+        if node_type == "closure":
+            closure_context = self._get_closure_context(node)
+            if closure_context in {"CLASS_BODY", "FUNCTION_BODY", "FOR_LOOP_BODY", "WHILE_LOOP_BODY", 
+                                 "IF_STATEMENT_BODY", "SWITCH_BODY", "TRY_BODY", "CATCH_BODY", "FINALLY_BODY"}:
+                # This is a structural block - don't treat as closure, parse children directly
+                # Skip creating a signature for this closure and parse its children instead
+                child_signatures = []
+                for child in node.named_children:
+                    child_sig = self.parse_recursive(child, source, depth, parent_hash, path, max_depth)
+                    child_signatures.append(child_sig)
+                
+                # For structural blocks, return the children directly without wrapping in a closure
+                # This prevents infinite recursion by not creating a closure signature
+                if len(child_signatures) == 1:
+                    # If there's only one child, return it directly
+                    return child_signatures[0]
+                elif len(child_signatures) > 1:
+                    # If there are multiple children, create a transparent container
+                    return RecursiveNodeSignature(
+                        node_type="structural_block",  # Don't use "closure" 
+                        identifier=None,
+                        content_hash=content_hash,
+                        structure_hash=self._hash_structure("structural_block", [c.structure_hash for c in child_signatures]),
+                        body_hash=None,
+                        start_line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        depth=depth,
+                        parent_hash=parent_hash,
+                        path=f"{path}/structural_block",
+                        children=child_signatures,
+                        is_pure_statement=False,
+                        is_container=True,
+                        code=code,
+                    )
+                else:
+                    # No children, treat as pure statement
+                    return RecursiveNodeSignature(
+                        node_type="empty_block",
+                        identifier=None,
+                        content_hash=content_hash,
+                        structure_hash=content_hash,
+                        body_hash=None,
+                        start_line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        depth=depth,
+                        parent_hash=parent_hash,
+                        path=f"{path}/empty_block",
+                        children=[],
+                        is_pure_statement=True,
+                        is_container=False,
+                        code=code,
+                    )
+            else:
+                # This is a real closure, treat as pure statement to avoid recursion
+                is_pure = True
+                is_container = False
+        else:
+            is_pure = node_type in GROOVY_LEAF_STATEMENTS
+            is_container = node_type in GROOVY_RECURSIVE_CONTAINERS
         
         # 3. Extract identifier if named
         identifier = self._extract_identifier(node, source)
@@ -149,6 +241,7 @@ class GroovyRecursiveParser:
         current_path = f"{path}/{node_type}"
         if identifier:
             current_path += f":{identifier}"
+        
         
         # 5. Create signature
         signature = RecursiveNodeSignature(
@@ -182,7 +275,8 @@ class GroovyRecursiveParser:
                 source,
                 depth + 1,
                 content_hash,
-                current_path
+                current_path,
+                max_depth
             )
             signature.children.append(child_sig)
         
@@ -195,6 +289,36 @@ class GroovyRecursiveParser:
             signature.body_hash = self._compute_body_hash(node, source)
         
         return signature
+    
+    def _get_closure_context(self, closure_node):
+        """Determine if a closure is a real closure or just a structural block."""
+        if not closure_node.parent:
+            return "UNKNOWN"
+        
+        parent = closure_node.parent
+        parent_type = parent.type
+        
+        # Check different contexts
+        if parent_type == "class_definition":
+            return "CLASS_BODY"
+        elif parent_type == "function_definition":
+            return "FUNCTION_BODY"
+        elif parent_type == "for_loop":
+            return "FOR_LOOP_BODY"
+        elif parent_type == "while_loop":
+            return "WHILE_LOOP_BODY"
+        elif parent_type == "if_statement":
+            return "IF_STATEMENT_BODY"
+        elif parent_type == "switch_statement":
+            return "SWITCH_BODY"
+        elif parent_type == "try_statement":
+            return "TRY_BODY"
+        elif parent_type in ["catch", "finally"]:
+            return f"{parent_type.upper()}_BODY"
+        elif parent_type in ["function_call", "juxt_function_call"]:
+            return "REAL_CLOSURE"  # This is likely a real closure passed to a function
+        else:
+            return f"OTHER_CONTEXT_{parent_type}"
     
     def compare_recursive_statements(
         self,
@@ -231,18 +355,27 @@ class GroovyRecursiveParser:
         if sig_a.is_container and sig_b.is_container:
             child_diffs = self._compare_container_children(sig_a, sig_b)
             
-            # Create container diff
-            container_diff = StatementDiff(
-                change_type=StatementChangeType.MODIFIED if child_diffs else StatementChangeType.UNCHANGED,
-                code=sig_b.code[:100] + "..." if len(sig_b.code) > 100 else sig_b.code,
-                node_type=sig_b.node_type,
-                file_a_line=sig_a.start_line,
-                file_b_line=sig_b.start_line,
-                child_diffs=child_diffs,
-                is_container=True,
-                description=f"Container {sig_b.node_type} with {len(child_diffs)} changes"
-            )
-            diffs.append(container_diff)
+            # Determine if the container itself changed
+            container_changed = sig_a.content_hash != sig_b.content_hash
+            
+            if container_changed or child_diffs:
+                # Create container diff showing the change
+                change_type = StatementChangeType.MODIFIED if container_changed else StatementChangeType.UNCHANGED
+                
+                container_diff = StatementDiff(
+                    change_type=change_type,
+                    code=sig_b.code[:100] + "..." if len(sig_b.code) > 100 else sig_b.code,
+                    node_type=sig_b.node_type,
+                    file_a_line=sig_a.start_line,
+                    file_b_line=sig_b.start_line,
+                    old_code=sig_a.code[:100] + "..." if len(sig_a.code) > 100 else sig_a.code if container_changed else None,
+                    child_diffs=child_diffs,
+                    is_container=True,
+                    similarity_score=self._calculate_similarity(sig_a.code, sig_b.code) if container_changed else 1.0,
+                    description=f"Container {sig_b.node_type} with {len(child_diffs)} nested changes"
+                )
+                diffs.append(container_diff)
+            
             return diffs
         
         # Mixed case - one is container, one is pure
@@ -274,7 +407,23 @@ class GroovyRecursiveParser:
         matched_a = set()
         matched_b = set()
         
-        # Phase 1: Match by content hash (exact matches)
+        # Phase 1: Match by identifier (same type and name) - CRITICAL for containers like classes/functions
+        for i, child_a in enumerate(children_a):
+            for j, child_b in enumerate(children_b):
+                if (i not in matched_a and j not in matched_b and
+                    child_a.node_type == child_b.node_type and
+                    child_a.identifier and child_b.identifier and
+                    child_a.identifier == child_b.identifier):
+                    
+                    # Found matching identifier - recursively compare
+                    child_diffs = self.compare_recursive_statements(child_a, child_b)
+                    diffs.extend(child_diffs)
+                    
+                    matched_a.add(i)
+                    matched_b.add(j)
+                    break
+        
+        # Phase 2: Match by content hash (exact matches)
         for i, child_a in enumerate(children_a):
             for j, child_b in enumerate(children_b):
                 if (i not in matched_a and j not in matched_b and
@@ -288,7 +437,7 @@ class GroovyRecursiveParser:
                     matched_b.add(j)
                     break
         
-        # Phase 2: Match by similarity (for modified statements)
+        # Phase 3: Match by similarity (for modified statements)
         for i, child_a in enumerate(children_a):
             if i in matched_a:
                 continue
@@ -308,30 +457,223 @@ class GroovyRecursiveParser:
                     matched_b.add(j)
                     break
         
-        # Phase 3: Remaining unmatched children
+        # Phase 4: Remaining unmatched children (deleted/added)
         for i, child_a in enumerate(children_a):
             if i not in matched_a:
+                # For deleted containers, recursively show what was inside
+                child_diffs = []
+                if child_a.is_container and child_a.children:
+                    child_diffs = self._generate_deleted_child_diffs(child_a)
+                
                 diff = StatementDiff(
                     change_type=StatementChangeType.DELETED,
                     code=child_a.code,
                     node_type=child_a.node_type,
                     file_a_line=child_a.start_line,
-                    description=f"Deleted {child_a.node_type}"
+                    description=f"Deleted {child_a.node_type}",
+                    is_container=child_a.is_container,
+                    child_diffs=child_diffs
                 )
                 diffs.append(diff)
         
         for j, child_b in enumerate(children_b):
             if j not in matched_b:
+                # For added containers, recursively show what was inside
+                child_diffs = []
+                if child_b.is_container and child_b.children:
+                    child_diffs = self._generate_added_child_diffs(child_b)
+                
                 diff = StatementDiff(
                     change_type=StatementChangeType.ADDED,
                     code=child_b.code,
                     node_type=child_b.node_type,
                     file_b_line=child_b.start_line,
-                    description=f"Added {child_b.node_type}"
+                    description=f"Added {child_b.node_type}",
+                    is_container=child_b.is_container,
+                    child_diffs=child_diffs
                 )
                 diffs.append(diff)
         
         return diffs
+    
+    def _compare_if_statement_branches(
+        self,
+        sig_a: RecursiveNodeSignature,
+        sig_b: RecursiveNodeSignature
+    ) -> List[StatementDiff]:
+        """
+        Compare if_statement nodes using branch-aware analysis.
+        
+        This method extracts and compares individual branches (if, else if, else)
+        similar to the JavaScript POC approach.
+        """
+        diffs = []
+        
+        # Extract branches from both nodes (we need to get source from somewhere)
+        # For now, let's use a simpler approach and fall back to regular container comparison
+        # TODO: Implement proper branch comparison with source access
+        return self._compare_container_children(sig_a, sig_b)
+        
+        # Track which branches have been matched
+        matched_a = set()
+        matched_b = set()
+        
+        # Phase 1: Match by condition (for if/else if branches)
+        for i, branch_a in enumerate(branches_a):
+            if i in matched_a:
+                continue
+                
+            for j, branch_b in enumerate(branches_b):
+                if j in matched_b:
+                    continue
+                
+                # Match by condition for if/else_if branches
+                if (branch_a["branch_type"] in ["if", "else_if"] and 
+                    branch_b["branch_type"] in ["if", "else_if"] and
+                    branch_a["condition"] == branch_b["condition"]):
+                    
+                    # Same condition - compare body statements
+                    body_diffs = self._compare_statement_lists(
+                        branch_a["statements"], branch_b["statements"]
+                    )
+                    
+                    if not body_diffs:
+                        # Unchanged branch
+                        change_type = StatementChangeType.UNCHANGED
+                        desc = f"{branch_a['branch_type']} ({branch_a['condition']}) unchanged"
+                    else:
+                        # Modified branch body
+                        change_type = StatementChangeType.MODIFIED
+                        desc = f"{branch_a['branch_type']} ({branch_a['condition']}) body modified"
+                    
+                    branch_label = f"{branch_a['branch_type']}({branch_a['condition']})"
+                    
+                    diffs.append(StatementDiff(
+                        change_type=change_type,
+                        code=branch_b["code"],
+                        node_type="if_branch",
+                        file_a_line=branch_a["start_line"],
+                        file_a_index=i,
+                        file_b_line=branch_b["start_line"],
+                        file_b_index=j,
+                        description=desc,
+                        old_code=branch_a["code"],
+                        branch_label=branch_label,
+                        is_container=True,
+                        child_diffs=body_diffs
+                    ))
+                    
+                    matched_a.add(i)
+                    matched_b.add(j)
+                    break
+                
+                # Match else branches
+                elif (branch_a["branch_type"] == "else" and 
+                      branch_b["branch_type"] == "else"):
+                    
+                    # Compare else body statements
+                    body_diffs = self._compare_statement_lists(
+                        branch_a["statements"], branch_b["statements"]
+                    )
+                    
+                    if not body_diffs:
+                        change_type = StatementChangeType.UNCHANGED
+                        desc = "else block unchanged"
+                    else:
+                        change_type = StatementChangeType.MODIFIED
+                        desc = "else block modified"
+                    
+                    diffs.append(StatementDiff(
+                        change_type=change_type,
+                        code=branch_b["code"],
+                        node_type="else_branch",
+                        file_a_line=branch_a["start_line"],
+                        file_a_index=i,
+                        file_b_line=branch_b["start_line"],
+                        file_b_index=j,
+                        description=desc,
+                        old_code=branch_a["code"],
+                        branch_label="else",
+                        is_container=True,
+                        child_diffs=body_diffs
+                    ))
+                    
+                    matched_a.add(i)
+                    matched_b.add(j)
+                    break
+        
+        # Phase 2: Handle unmatched branches (added/deleted)
+        for i, branch_a in enumerate(branches_a):
+            if i not in matched_a:
+                # Deleted branch
+                branch_label = f"{branch_a['branch_type']}({branch_a['condition']})" if branch_a['condition'] else branch_a['branch_type']
+                diffs.append(StatementDiff(
+                    change_type=StatementChangeType.DELETED,
+                    code=branch_a["code"],
+                    node_type="if_branch" if branch_a["branch_type"] != "else" else "else_branch",
+                    file_a_line=branch_a["start_line"],
+                    file_a_index=i,
+                    description=f"{branch_a['branch_type']} ({branch_a['condition']}) deleted from position {i}" if branch_a['condition'] else f"{branch_a['branch_type']} deleted from position {i}",
+                    branch_label=branch_label,
+                    is_container=True
+                ))
+        
+        for j, branch_b in enumerate(branches_b):
+            if j not in matched_b:
+                # Added branch
+                branch_label = f"{branch_b['branch_type']}({branch_b['condition']})" if branch_b['condition'] else branch_b['branch_type']
+                diffs.append(StatementDiff(
+                    change_type=StatementChangeType.ADDED,
+                    code=branch_b["code"],
+                    node_type="if_branch" if branch_b["branch_type"] != "else" else "else_branch",
+                    file_b_line=branch_b["start_line"],
+                    file_b_index=j,
+                    description=f"{branch_b['branch_type']} ({branch_b['condition']}) added at position {j}" if branch_b['condition'] else f"{branch_b['branch_type']} added at position {j}",
+                    branch_label=branch_label,
+                    is_container=True
+                ))
+        
+        return diffs
+    
+    def _generate_deleted_child_diffs(self, sig: RecursiveNodeSignature) -> List[StatementDiff]:
+        """Generate child diffs for a deleted container, showing all nested deletions."""
+        child_diffs = []
+        for child in sig.children:
+            nested_diffs = []
+            if child.is_container and child.children:
+                nested_diffs = self._generate_deleted_child_diffs(child)
+            
+            diff = StatementDiff(
+                change_type=StatementChangeType.DELETED,
+                code=child.code,
+                node_type=child.node_type,
+                file_a_line=child.start_line,
+                description=f"Deleted {child.node_type}",
+                is_container=child.is_container,
+                child_diffs=nested_diffs
+            )
+            child_diffs.append(diff)
+        return child_diffs
+    
+    def _generate_added_child_diffs(self, sig: RecursiveNodeSignature) -> List[StatementDiff]:
+        """Generate child diffs for an added container, showing all nested additions."""
+        child_diffs = []
+        for child in sig.children:
+            nested_diffs = []
+            if child.is_container and child.children:
+                nested_diffs = self._generate_added_child_diffs(child)
+            
+            diff = StatementDiff(
+                change_type=StatementChangeType.ADDED,
+                code=child.code,
+                node_type=child.node_type,
+                file_b_line=child.start_line,
+                description=f"Added {child.node_type}",
+                is_container=child.is_container,
+                child_diffs=nested_diffs
+            )
+            child_diffs.append(diff)
+        return child_diffs
     
     def _get_parseable_children(self, node) -> List:
         """
@@ -354,8 +696,8 @@ class GroovyRecursiveParser:
                     # Single statement body
                     children.append(body)
         
-        # Class containers
-        elif node_type in GROOVY_CLASS_TYPES:
+        # Class containers (including new types)
+        elif node_type in {"class_definition", "interface_definition", "trait_definition", "enum_definition", "annotation_definition"}:
             body = node.child_by_field_name("body")
             if body:
                 for child in body.named_children:
@@ -363,13 +705,13 @@ class GroovyRecursiveParser:
         
         # If statement
         elif node_type == "if_statement":
-            consequence = node.child_by_field_name("consequence")
-            alternative = node.child_by_field_name("alternative")
+            body = node.child_by_field_name("body")
+            else_body = node.child_by_field_name("else_body")
             
-            if consequence:
-                children.extend(self._get_block_statements(consequence))
-            if alternative:
-                children.extend(self._get_block_statements(alternative))
+            if body:
+                children.extend(self._get_block_statements(body))
+            if else_body:
+                children.extend(self._get_block_statements(else_body))
         
         # Switch statement
         elif node_type == "switch_statement":
@@ -378,14 +720,21 @@ class GroovyRecursiveParser:
                 for case in body.named_children:
                     children.append(case)
         
-        elif node_type in {"switch_case", "switch_default"}:
+        # Switch cases (CORRECTED node types)
+        elif node_type == "switch_block":
+            # Switch block contains case statements
+            for child in node.named_children:
+                if child.type == "case":
+                    children.append(child)
+        
+        elif node_type in {"case", "switch_default"}:
             # Get statements after the case label
             for child in node.named_children:
                 if child.type not in {"identifier", "number", "string"}:
                     children.append(child)
         
-        # Loops
-        elif node_type in {"for_statement", "for_in_statement", "while_statement", "do_while_statement"}:
+        # Loops (CORRECTED node types)
+        elif node_type in {"for_loop", "for_in_loop", "while_loop", "do_while_statement"}:
             body = node.child_by_field_name("body")
             if body:
                 children.extend(self._get_block_statements(body))
@@ -413,13 +762,85 @@ class GroovyRecursiveParser:
             for child in node.named_children:
                 children.append(child)
         
-        # Closure
-        elif node_type in {"closure", "closure_expression"}:
+        # Closure (context-aware handling)
+        elif node_type == "closure":
+            closure_context = self._get_closure_context(node)
+            if closure_context in {"CLASS_BODY", "FUNCTION_BODY", "FOR_LOOP_BODY", "WHILE_LOOP_BODY", 
+                                 "IF_STATEMENT_BODY", "SWITCH_BODY", "TRY_BODY", "CATCH_BODY", "FINALLY_BODY"}:
+                # This is a structural block - parse all children normally
+                for child in node.named_children:
+                    children.append(child)
+            # For real closures, don't recurse to avoid complexity
+        
+        elif node_type == "closure_expression":
+            # Handle closure expressions similarly
+            for child in node.named_children:
+                children.append(child)
+        
+        # Additional Groovy containers
+        elif node_type == "synchronized_statement":
             body = node.child_by_field_name("body")
             if body:
                 children.extend(self._get_block_statements(body))
         
+        elif node_type == "labeled_statement":
+            statement = node.child_by_field_name("statement")
+            if statement:
+                children.append(statement)
+        
         return children
+    
+    def _extract_if_branches(self, if_node, source: bytes = None) -> List[dict]:
+        """
+        Extract branches from an if_statement node.
+        
+        Returns a list of branch dictionaries with:
+        - branch_type: "if", "else_if", or "else"
+        - condition: the condition code (None for else)
+        - statements: list of statement nodes in the branch body
+        - start_line: starting line number
+        - code: full branch code
+        """
+        branches = []
+        
+        # Main if branch
+        condition_node = if_node.child_by_field_name("condition")
+        body_node = if_node.child_by_field_name("body")
+        
+        if condition_node and body_node:
+            condition_code = source[condition_node.start_byte:condition_node.end_byte].decode('utf-8', errors='replace')
+            body_statements = self._get_block_statements(body_node)
+            
+            branches.append({
+                "branch_type": "if",
+                "condition": condition_code,
+                "statements": body_statements,
+                "start_line": if_node.start_point[0] + 1,
+                "code": source[if_node.start_byte:body_node.end_byte].decode('utf-8', errors='replace')
+            })
+        
+        # Handle else/else if
+        else_body_node = if_node.child_by_field_name("else_body")
+        if else_body_node:
+            if else_body_node.type == "if_statement":
+                # This is an "else if" - recursively extract its branches
+                nested_branches = self._extract_if_branches(else_body_node, source)
+                for branch in nested_branches:
+                    if branch["branch_type"] == "if":
+                        branch["branch_type"] = "else_if"
+                    branches.extend([branch])
+            else:
+                # This is a plain "else"
+                else_statements = self._get_block_statements(else_body_node)
+                branches.append({
+                    "branch_type": "else",
+                    "condition": None,
+                    "statements": else_statements,
+                    "start_line": else_body_node.start_point[0] + 1,
+                    "code": source[else_body_node.start_byte:else_body_node.end_byte].decode('utf-8', errors='replace')
+                })
+        
+        return branches
     
     def _get_block_statements(self, block_node) -> List:
         """Get statements from a block node."""

@@ -1,0 +1,124 @@
+{
+  "is_identical": false,
+  "structural_similarity": 0.0,
+  "total_blocks_a": 3,
+  "total_blocks_b": 4,
+  "blocks_added": 1,
+  "blocks_deleted": 0,
+  "blocks_modified": 0,
+  "blocks_moved": 0,
+  "blocks_moved_modified": 3,
+  "blocks_unchanged": 0,
+  "file_a_path": "test-samples/script_before.groovy",
+  "file_b_path": "test-samples/script_after.groovy",
+  "differences": [
+    {
+      "change_type": "moved_modified",
+      "block_type": "declaration",
+      "identifier": "appName",
+      "file_a_start_line": 1,
+      "file_a_end_line": 1,
+      "file_a_code": "String appName = \"MyApp\"",
+      "file_b_start_line": 3,
+      "file_b_end_line": 3,
+      "file_b_code": "String appName = \"MyEnhancedApp\"",
+      "similarity_score": 80.76923076923077,
+      "description": "Moved and modified declaration 'appName' from position 1 to 2 (80.8% similar)",
+      "modifiers": [],
+      "statement_diffs": [
+        {
+          "change_type": "modified",
+          "code": "\"MyEnhancedApp\"",
+          "node_type": "string",
+          "file_a_line": 1,
+          "file_a_index": 0,
+          "file_b_line": 3,
+          "file_b_index": 0,
+          "description": "Statement modified: string 'anonymous_string' (50.0% similar)",
+          "old_code": "\"MyApp\"",
+          "similarity_score": 0.5,
+          "is_container": false,
+          "branch_label": null,
+          "child_diffs": []
+        }
+      ]
+    },
+    {
+      "change_type": "moved_modified",
+      "block_type": "method",
+      "identifier": "initialize",
+      "file_a_start_line": 3,
+      "file_a_end_line": 5,
+      "file_a_code": "void initialize() {\n    println \"Initializing ${appName}\"\n}",
+      "file_b_start_line": 5,
+      "file_b_end_line": 7,
+      "file_b_code": "void initialize() {\n    println \"Starting up ${appName} v2.0\"\n}",
+      "similarity_score": 82.0,
+      "description": "Moved and modified method 'initialize' from position 2 to 3 (82.0% similar)",
+      "modifiers": [],
+      "statement_diffs": [
+        {
+          "change_type": "modified",
+          "code": "println \"Starting up ${appName} v2.0\"",
+          "node_type": "juxt_function_call",
+          "file_a_line": 4,
+          "file_a_index": 0,
+          "file_b_line": 6,
+          "file_b_index": 0,
+          "description": "Statement modified: juxt_function_call 'stmt_0' (63.6% similar)",
+          "old_code": "println \"Initializing ${appName}\"",
+          "similarity_score": 0.6363636363636364,
+          "is_container": false,
+          "branch_label": null,
+          "child_diffs": []
+        }
+      ]
+    },
+    {
+      "change_type": "moved_modified",
+      "block_type": "declaration",
+      "identifier": "maxRetries",
+      "file_a_start_line": 7,
+      "file_a_end_line": 7,
+      "file_a_code": "int maxRetries = 3",
+      "file_b_start_line": 1,
+      "file_b_end_line": 1,
+      "file_b_code": "int maxRetries = 5",
+      "similarity_score": 94.11764705882352,
+      "description": "Moved and modified declaration 'maxRetries' from position 3 to 1 (94.1% similar)",
+      "modifiers": [],
+      "statement_diffs": [
+        {
+          "change_type": "modified",
+          "code": "5",
+          "node_type": "number_literal",
+          "file_a_line": 7,
+          "file_a_index": 1,
+          "file_b_line": 1,
+          "file_b_index": 1,
+          "description": "Statement modified: number_literal 'anonymous_number_literal' (0.0% similar)",
+          "old_code": "3",
+          "similarity_score": 0.0,
+          "is_container": false,
+          "branch_label": null,
+          "child_diffs": []
+        }
+      ]
+    },
+    {
+      "change_type": "added",
+      "block_type": "method",
+      "identifier": "cleanup",
+      "file_a_start_line": null,
+      "file_a_end_line": null,
+      "file_a_code": null,
+      "file_b_start_line": 9,
+      "file_b_end_line": 11,
+      "file_b_code": "void cleanup() {\n    println \"Cleaning up resources\"\n}",
+      "similarity_score": 0.0,
+      "description": "Added method 'cleanup'",
+      "modifiers": []
+    }
+  ],
+  "message": "Detected 4 change(s). Similarity: 0.0%"
+}

@@ -68,9 +68,15 @@ class BlockType(Enum):
     PACKAGE = "package"                # package declaration
     
     # =========================================================================
+    # FUNCTION CALLS AND EXPRESSIONS
+    # =========================================================================
+    FUNCTION_CALL = "function_call"    # Function/method calls
+    EXPRESSION = "expression"          # Top-level expression
+    DECLARATION = "declaration"        # Variable declarations
+    
+    # =========================================================================
     # OTHER
     # =========================================================================
-    EXPRESSION = "expression"          # Top-level expression
     STATEMENT = "statement"            # Generic statement
     COMMENT = "comment"                # Comments
     UNKNOWN = "unknown"                # Unrecognized block type
@@ -113,10 +119,26 @@ GROOVY_NODE_TYPE_TO_BLOCK_TYPE = {
     # Script elements
     "script_method": BlockType.SCRIPT_METHOD,
     "script_variable": BlockType.SCRIPT_VARIABLE,
+    "declaration": BlockType.DECLARATION,  # Variable declarations -> declaration
     
-    # Import/Package
-    "import_statement": BlockType.IMPORT,
-    "package_statement": BlockType.PACKAGE,
+    # Function calls and expressions (based on actual tree-sitter node types)
+    "juxt_function_call": BlockType.FUNCTION_CALL,  # println "text" -> function_call
+    "function_call": BlockType.EXPRESSION,          # Math.max(5, 10) -> expression
+    "method_call": BlockType.FUNCTION_CALL,         # obj.method() -> function_call
+    "assignment": BlockType.EXPRESSION,             # value += number -> expression
+    "binary_op": BlockType.EXPRESSION,              # list << item, a + b -> expression
+    
+    # Import/Package (using actual tree-sitter node names)
+    "groovy_import": BlockType.IMPORT,
+    "groovy_package": BlockType.PACKAGE,
+    
+    # Control flow statements
+    "for_loop": BlockType.STATEMENT,        # for loops -> statement
+    "for_in_loop": BlockType.STATEMENT,     # for-in loops -> statement  
+    "while_loop": BlockType.STATEMENT,      # while loops -> statement
+    "if_statement": BlockType.STATEMENT,    # if statements -> statement
+    "switch_statement": BlockType.STATEMENT, # switch statements -> statement
+    "try_statement": BlockType.STATEMENT,   # try-catch -> statement
     
     # Other
     "expression_statement": BlockType.EXPRESSION,
@@ -142,8 +164,9 @@ GROOVY_CLASS_TYPES = {
 # Groovy field/property types
 GROOVY_FIELD_TYPES = {
     "field_definition",
-    "property_definition",
+    "property_definition", 
     "variable_definition",
+    "declaration",  # Groovy field declarations
 }
 
 # Pure statement types (leaf nodes)
@@ -160,21 +183,30 @@ GROOVY_PURE_STATEMENT_TYPES = {
 
 # Container types that need recursive parsing
 GROOVY_CONTAINER_TYPES = {
+    # Class/Interface containers
     "class_definition",
     "interface_definition", 
     "trait_definition",
     "enum_definition",
+    
+    # Function/Method containers
     "function_definition",
     "method_definition",
     "constructor_definition",
+    
+    # Control flow containers (CORRECTED node types)
     "if_statement",
-    "for_statement",
-    "while_statement",
+    "for_loop",           # FIXED: was for_statement
+    "for_in_loop",       # FIXED: was for_in_statement  
+    "while_loop",        # FIXED: was while_statement
     "switch_statement",
+    "switch_block",      # NEW: container for switch cases
+    "case",              # NEW: switch case container
     "try_statement",
-    "catch_clause",
-    "finally_clause",
+    
+    # Block containers
     "closure",
     "closure_expression",
     "block",
+    "statement_block",
 }
