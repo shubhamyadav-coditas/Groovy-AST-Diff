@@ -32,7 +32,7 @@ sys.setrecursionlimit(5000)
 import tree_sitter
 from tree_sitter import Language, Parser, Node
 
-from .groovy_types import (
+from ..types.groovy_types import (
     ChangeType, BlockType, StatementChangeType,
     GROOVY_NODE_TYPE_TO_BLOCK_TYPE,
     GROOVY_FUNCTION_TYPES,
@@ -194,9 +194,64 @@ class GroovyASTDiff:
         print("####################################################################################################")
         
         # Process each top-level child node
-        for child in root_node.named_children:
+        children = list(root_node.named_children)
+        i = 0
+        
+        while i < len(children):
+            child = children[i]
+            
+            # Handle typed declarations: identifier followed by assignment (emery syntax: USER_PROFILE_FORM formObj = Emery.form.newForm("USER_PROFILE_FORM"))
+            if (child.type == 'identifier' and 
+                i + 1 < len(children) and 
+                children[i + 1].type == 'assignment'):
+                
+                # Combine the type identifier and assignment into a single typed declaration
+                type_node = child
+                assignment_node = children[i + 1]
+                
+                # Create a synthetic node that spans both the type and assignment
+                combined_start = type_node.start_byte
+                combined_end = assignment_node.end_byte
+                combined_code = source[combined_start:combined_end].decode('utf-8', errors='replace')
+                
+                # Use the assignment node as the base but with extended code
+                signature = self.recursive_parser.parse_recursive(assignment_node, source)
+                # Override the code to include the type declaration
+                signature.code = combined_code
+                signatures.append(signature)
+                
+                # Skip the next node (assignment) since we processed it
+                i += 2
+                continue
+            
+            # Handle method calls with closure arguments: declaration/expression followed by closure
+            # This fixes Groovy collection methods like: list.findAll { condition }
+            if (child.type in {'declaration', 'expression_statement'} and 
+                i + 1 < len(children) and 
+                children[i + 1].type == 'closure'):
+                
+                # Check if the declaration/expression ends with a method call (like statusData.findAll)
+                method_call_node = child
+                closure_node = children[i + 1]
+                
+                # Combine the method call and closure into a single statement
+                combined_start = method_call_node.start_byte
+                combined_end = closure_node.end_byte
+                combined_code = source[combined_start:combined_end].decode('utf-8', errors='replace')
+                
+                # Use the method call node as the base but with extended code
+                signature = self.recursive_parser.parse_recursive(method_call_node, source)
+                # Override the code to include the closure
+                signature.code = combined_code
+                signatures.append(signature)
+                
+                # Skip the next node (closure) since we processed it
+                i += 2
+                continue
+            
             # Skip structural nodes that aren't meaningful blocks
             if child.type in {'identifier', 'type', 'parameters', 'formal_parameters'}:
+                i += 1
                 continue
             
             # Check if this is a recognized top-level block type
@@ -205,6 +260,8 @@ class GroovyASTDiff:
                 # Use recursive parser to build hierarchical signature
                 signature = self.recursive_parser.parse_recursive(child, source)
                 signatures.append(signature)
+            
+            i += 1
         
         return signatures
     
@@ -401,6 +458,21 @@ class GroovyASTDiff:
                 elif child.type == "identifier":
                     return source[child.start_byte:child.end_byte].decode('utf-8', errors='replace')
 
+        elif node.type == "function_call":
+            # For function calls, extract the function name from the 'function' field
+            function_node = node.child_by_field_name("function")
+            if function_node:
+                if function_node.type == "identifier":
+                    # Simple function call: func()
+                    return source[function_node.start_byte:function_node.end_byte].decode('utf-8', errors='replace')
+                elif function_node.type == "dotted_identifier":
+                    # Dotted function call: Emery.mdos.getMdosDisplayValuesClob()
+                    # Extract the full dotted path as the identifier
+                    return source[function_node.start_byte:function_node.end_byte].decode('utf-8', errors='replace')
+                elif function_node.type in {"member_access", "property_access"}:
+                    # Member access: obj.method()
+                    return source[function_node.start_byte:function_node.end_byte].decode('utf-8', errors='replace')
+
         # Generic fallback - look for any identifier child
         for child in node.named_children:
             if child.type == "identifier":
@@ -462,12 +534,12 @@ class GroovyASTDiff:
                     else:
                         # Modified (same identifier, different content) - check if also moved
                         similarity = calculate_similarity(block_a.code, block_b.code) * 100
-                        if i != j:
-                            # Different position AND different content = MOVED_MODIFIED
+                        if block_a.start_line != block_b.start_line:
+                            # Different line position AND different content = MOVED_MODIFIED
                             change_type = ChangeType.MOVED_MODIFIED
                             description = f"Moved and modified {block_a.block_type.value} '{block_a.identifier}' from position {i+1} to {j+1} ({similarity:.1f}% similar)"
                         else:
-                            # Same position, different content = MODIFIED
+                            # Same line position, different content = MODIFIED
                             change_type = ChangeType.MODIFIED
                             description = f"Modified {block_a.block_type.value} '{block_a.identifier}' ({similarity:.1f}% similar)"
                     

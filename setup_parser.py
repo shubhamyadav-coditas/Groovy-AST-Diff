@@ -11,7 +11,7 @@ try:
     from tree_sitter import Language
 except ImportError:
     print("Error: tree-sitter package not found. Please install it first:")
-    print("pip install tree-sitter")
+    print("pip install tree-sitter==0.21.3")
     sys.exit(1)
 
 def run_command(cmd, cwd=None):
@@ -29,6 +29,15 @@ def run_command(cmd, cwd=None):
 def main():
     """Set up the tree-sitter-groovy parser."""
     print("Setting up Tree-sitter Groovy parser...")
+    
+    # Check if parser already exists
+    build_dir = Path("build")
+    groovy_so = build_dir / "groovy.so"
+    
+    if groovy_so.exists():
+        print("✓ Tree-sitter Groovy parser already exists!")
+        print(f"Library location: {groovy_so.absolute()}")
+        return
     
     # Create parsers directory
     parsers_dir = Path("parsers")
@@ -94,7 +103,19 @@ def main():
     except Exception as e:
         print(f"Error building parser: {e}")
         print("This might be due to missing C compiler or incomplete repository.")
-        sys.exit(1)
+        print("\nTrying to copy from original project...")
+        
+        # Try to copy from the original project if it exists
+        original_build = Path("../Groovy-AST-Diff/build/groovy.so")
+        if original_build.exists():
+            import shutil
+            shutil.copy2(original_build, build_dir / "groovy.so")
+            print("✓ Copied parser from original project!")
+            print(f"Library location: {(build_dir / 'groovy.so').absolute()}")
+        else:
+            print("Could not build or find Groovy parser.")
+            print("Please ensure you have a C compiler installed (gcc/clang).")
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()

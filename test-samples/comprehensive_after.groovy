@@ -1,41 +1,32 @@
-// Comprehensive test - AFTER
-
-package com.example.enhanced  // MODIFIED: package changed
+package com.example.enhanced
 
 import java.util.List
 import java.util.Set  // ADDED: new import
 
-// MOVED: version moved to top
-String version = "2.0"  // MODIFIED: version updated
+String version = "2.0"
 
-// MOVED_MODIFIED: helper moved and changed
 def helper = { msg, level -> 
-    println "[${level}] ${msg}"  // MODIFIED: added level parameter
+    println "[${level}] ${msg}"
 }
 
-// MODIFIED: Service class enhanced
 class UserService {
-    private String database = "postgresql"  // MODIFIED: database changed
-    boolean debug = true  // ADDED: new field
+    private String database = "postgresql"
+    boolean debug = true
     
-    // UNCHANGED: constructor stays same
     UserService() {
         println "Service created"
     }
     
-    // MODIFIED: method signature changed
-    void save(String data, boolean validate) {  // MODIFIED: added parameter
-        if (validate) println "Validating..."  // MODIFIED: added validation
+    void save(String data, boolean validate) {
+        if (validate) println "Validating..."
         println "Saving: ${data}"
     }
     
-    // ADDED: new method
     void delete(String id) {
         println "Deleting: ${id}"
     }
 }
 
-// ADDED: new interface
 interface Validator {
     boolean isValid(String input)
 }

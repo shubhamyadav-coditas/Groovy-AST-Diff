@@ -9,12 +9,12 @@ from typing import List, Optional, Dict, Set, Tuple
 from dataclasses import dataclass, field
 import hashlib
 
-from groovy_types import (
+from ..types.groovy_types import (
     BlockType, ChangeType, StatementChangeType,
     GROOVY_CONTAINER_TYPES, GROOVY_PURE_STATEMENT_TYPES,
     GROOVY_FUNCTION_TYPES, GROOVY_CLASS_TYPES
 )
-from groovy_domain import StatementSignature, StatementDiff
+from .groovy_domain import StatementSignature, StatementDiff
 
 
 # Groovy container types that need recursive parsing

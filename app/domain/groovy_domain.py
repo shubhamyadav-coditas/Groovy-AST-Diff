@@ -8,7 +8,7 @@ following the same structure as the JavaScript AST Diff POC.
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Any
 
-from groovy_types import BlockType, ChangeType, StatementChangeType
+from ..types.groovy_types import BlockType, ChangeType, StatementChangeType
 
 
 @dataclass
