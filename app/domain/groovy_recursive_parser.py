@@ -34,6 +34,7 @@ GROOVY_RECURSIVE_CONTAINERS = {
     "for_loop",           # FIXED: was for_statement
     "for_in_loop",       # FIXED: was for_in_statement
     "while_loop",        # FIXED: was while_statement
+    "do_while_loop",     # FIXED: actual node type is do_while_loop
     "do_while_statement", # Keep this for completeness
     
     # Block containers

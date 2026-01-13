@@ -136,6 +136,7 @@ GROOVY_NODE_TYPE_TO_BLOCK_TYPE = {
     "for_loop": BlockType.STATEMENT,        # for loops -> statement
     "for_in_loop": BlockType.STATEMENT,     # for-in loops -> statement  
     "while_loop": BlockType.STATEMENT,      # while loops -> statement
+    "do_while_loop": BlockType.STATEMENT,   # do-while loops -> statement
     "if_statement": BlockType.STATEMENT,    # if statements -> statement
     "switch_statement": BlockType.STATEMENT, # switch statements -> statement
     "try_statement": BlockType.STATEMENT,   # try-catch -> statement
