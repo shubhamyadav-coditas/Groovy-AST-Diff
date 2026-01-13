@@ -23,8 +23,8 @@ GROOVY_RECURSIVE_CONTAINERS = {
     "if_statement",
     "else_clause", 
     "switch_statement",
-    "switch_block",      # NEW: container for switch cases
-    "case",              # NEW: switch case container (was switch_case)
+    "switch_block",      # FIXED: back to container, but with special handling
+    # NOTE: "case" remains in GROOVY_LEAF_STATEMENTS to prevent infinite recursion
     "switch_default",
     "try_statement",
     "catch_clause",
@@ -72,7 +72,9 @@ GROOVY_LEAF_STATEMENTS = {
     "variable_declaration",
     "field_declaration",
     "empty_statement",
-    "declaration" # declaration is a pure statement in groovy grammar
+    "declaration", # declaration is a pure statement in groovy grammar
+    "case",        # FIXED: case statements are pure (leaf nodes) to prevent infinite recursion
+    # NOTE: switch_block moved back to containers with special handling
     # NOTE: closures are now handled contextually in parse_recursive method
 }
 
@@ -231,8 +233,14 @@ class GroovyRecursiveParser:
                 is_pure = True
                 is_container = False
         else:
-            is_pure = node_type in GROOVY_LEAF_STATEMENTS
-            is_container = node_type in GROOVY_RECURSIVE_CONTAINERS
+            # Special handling for switch_block to prevent infinite recursion
+            if node_type == "switch_block":
+                # switch_block is a container, but we need to be careful about recursion
+                is_pure = False
+                is_container = True
+            else:
+                is_pure = node_type in GROOVY_LEAF_STATEMENTS
+                is_container = node_type in GROOVY_RECURSIVE_CONTAINERS
         
         # 3. Extract identifier if named
         identifier = self._extract_identifier(node, source)

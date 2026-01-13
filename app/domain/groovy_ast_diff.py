@@ -1022,6 +1022,216 @@ class GroovyASTDiff:
             else:
                 return self._extract_and_compare_function_statements(node_a, node_b, source_a, source_b)
     
+    def _compare_switch_statement_cases(self, node_a: Node, node_b: Node, source_a: bytes, source_b: bytes) -> List[StatementDiff]:
+        """
+        Compare switch statement cases similar to JavaScript POC approach.
+        
+        Extracts individual case statements and compares them separately.
+        """
+        try:
+            # Find switch_block nodes in both switch statements
+            switch_block_a = None
+            switch_block_b = None
+            
+            for child in node_a.named_children:
+                if child.type == "switch_block":
+                    switch_block_a = child
+                    break
+                    
+            for child in node_b.named_children:
+                if child.type == "switch_block":
+                    switch_block_b = child
+                    break
+            
+            if not switch_block_a or not switch_block_b:
+                return []
+            
+            # Extract case statements from both switch blocks
+            cases_a = []
+            cases_b = []
+            
+            for child in switch_block_a.named_children:
+                if child.type in ["case", "switch_default"]:
+                    case_code = source_a[child.start_byte:child.end_byte].decode('utf-8', errors='replace')
+                    cases_a.append({
+                        "node": child,
+                        "code": case_code,
+                        "type": child.type,
+                        "line": child.start_point[0] + 1
+                    })
+            
+            for child in switch_block_b.named_children:
+                if child.type in ["case", "switch_default"]:
+                    case_code = source_b[child.start_byte:child.end_byte].decode('utf-8', errors='replace')
+                    cases_b.append({
+                        "node": child,
+                        "code": case_code,
+                        "type": child.type,
+                        "line": child.start_point[0] + 1
+                    })
+            
+            # Compare cases using simple matching (by index for now)
+            diffs = []
+            max_cases = max(len(cases_a), len(cases_b))
+            
+            for i in range(max_cases):
+                if i < len(cases_a) and i < len(cases_b):
+                    case_a = cases_a[i]
+                    case_b = cases_b[i]
+                    
+                    # Calculate similarity
+                    similarity = self._calculate_text_similarity(case_a["code"], case_b["code"])
+                    
+                    if similarity < 1.0:  # Modified case
+                        diffs.append(StatementDiff(
+                            change_type=StatementChangeType.MODIFIED,
+                            code=case_b["code"],
+                            node_type=case_b["type"],
+                            file_a_line=case_a["line"],
+                            file_a_index=i,
+                            file_b_line=case_b["line"],
+                            file_b_index=i,
+                            description=f"Statement modified at index {i} ({similarity*100:.0f}% similar)",
+                            old_code=case_a["code"],
+                            similarity_score=similarity,
+                            child_diffs=[],
+                            is_container=False,
+                            branch_label=None
+                        ))
+                elif i < len(cases_a):
+                    # Deleted case
+                    case_a = cases_a[i]
+                    diffs.append(StatementDiff(
+                        change_type=StatementChangeType.DELETED,
+                        code=case_a["code"],
+                        node_type=case_a["type"],
+                        file_a_line=case_a["line"],
+                        file_a_index=i,
+                        description=f"Case deleted at index {i}",
+                        is_container=False,
+                        child_diffs=[]
+                    ))
+                else:
+                    # Added case
+                    case_b = cases_b[i]
+                    diffs.append(StatementDiff(
+                        change_type=StatementChangeType.ADDED,
+                        code=case_b["code"],
+                        node_type=case_b["type"],
+                        file_b_line=case_b["line"],
+                        file_b_index=i,
+                        description=f"Case added at index {i}",
+                        is_container=False,
+                        child_diffs=[]
+                    ))
+            
+            return diffs
+            
+        except Exception as e:
+            print(f"Warning: Failed to compare switch statement cases: {e}")
+            return []
+
+    def _compare_switch_block_cases(self, switch_block_a: Node, switch_block_b: Node, source_a: bytes, source_b: bytes) -> List[StatementDiff]:
+        """
+        Compare switch block cases directly (when comparison happens at switch_block level).
+        
+        This is similar to _compare_switch_statement_cases but works directly on switch_block nodes.
+        """
+        try:
+            # Extract case statements from both switch blocks
+            cases_a = []
+            cases_b = []
+            
+            for child in switch_block_a.named_children:
+                if child.type in ["case", "switch_default"]:
+                    case_code = source_a[child.start_byte:child.end_byte].decode('utf-8', errors='replace')
+                    cases_a.append({
+                        "node": child,
+                        "code": case_code,
+                        "type": child.type,
+                        "line": child.start_point[0] + 1
+                    })
+            
+            for child in switch_block_b.named_children:
+                if child.type in ["case", "switch_default"]:
+                    case_code = source_b[child.start_byte:child.end_byte].decode('utf-8', errors='replace')
+                    cases_b.append({
+                        "node": child,
+                        "code": case_code,
+                        "type": child.type,
+                        "line": child.start_point[0] + 1
+                    })
+            
+            # Compare cases using simple matching (by index for now)
+            diffs = []
+            max_cases = max(len(cases_a), len(cases_b))
+            
+            for i in range(max_cases):
+                if i < len(cases_a) and i < len(cases_b):
+                    case_a = cases_a[i]
+                    case_b = cases_b[i]
+                    
+                    # Calculate similarity
+                    similarity = self._calculate_text_similarity(case_a["code"], case_b["code"])
+                    
+                    if similarity < 1.0:  # Modified case
+                        diffs.append(StatementDiff(
+                            change_type=StatementChangeType.MODIFIED,
+                            code=case_b["code"],
+                            node_type=case_b["type"],
+                            file_a_line=case_a["line"],
+                            file_a_index=i,
+                            file_b_line=case_b["line"],
+                            file_b_index=i,
+                            description=f"Statement modified at index {i} ({similarity*100:.0f}% similar)",
+                            old_code=case_a["code"],
+                            similarity_score=similarity,
+                            child_diffs=[],
+                            is_container=False,
+                            branch_label=None
+                        ))
+                elif i < len(cases_a):
+                    # Deleted case
+                    case_a = cases_a[i]
+                    diffs.append(StatementDiff(
+                        change_type=StatementChangeType.DELETED,
+                        code=case_a["code"],
+                        node_type=case_a["type"],
+                        file_a_line=case_a["line"],
+                        file_a_index=i,
+                        description=f"Case deleted at index {i}",
+                        is_container=False,
+                        child_diffs=[]
+                    ))
+                else:
+                    # Added case
+                    case_b = cases_b[i]
+                    diffs.append(StatementDiff(
+                        change_type=StatementChangeType.ADDED,
+                        code=case_b["code"],
+                        node_type=case_b["type"],
+                        file_b_line=case_b["line"],
+                        file_b_index=i,
+                        description=f"Case added at index {i}",
+                        is_container=False,
+                        child_diffs=[]
+                    ))
+            
+            return diffs
+            
+        except Exception as e:
+            print(f"Warning: Failed to compare switch block cases: {e}")
+            return []
+
+    def _calculate_text_similarity(self, text_a: str, text_b: str) -> float:
+        """Calculate similarity between two text strings using simple ratio."""
+        try:
+            from difflib import SequenceMatcher
+            return SequenceMatcher(None, text_a, text_b).ratio()
+        except Exception:
+            # Fallback to simple equality check
+            return 1.0 if text_a == text_b else 0.0
+
     def _compare_if_statement_branches(
         self,
         node_a,
@@ -1699,6 +1909,12 @@ class GroovyASTDiff:
         This analyzes what changed inside the container (method parameters, body statements, etc.)
         """
         try:
+            # Special handling for switch_block nodes - they can't be parsed in isolation
+            if member_a.node_type == "switch_block" or member_b.node_type == "switch_block":
+                # Switch blocks contain case statements that should be compared as pure statements
+                # Don't try to parse them in isolation as they're not valid standalone Groovy
+                return []
+            
             # Parse both member codes as individual units
             member_a_code = member_a.code.encode('utf-8')
             member_b_code = member_b.code.encode('utf-8')
@@ -2101,6 +2317,12 @@ class GroovyASTDiff:
                                     # Special handling for if_statement nodes - use branch-aware analysis
                                     if node_a.type == "if_statement" and node_b.type == "if_statement":
                                         diff.child_diffs = self._compare_if_statement_branches(node_a, node_b, source_a, source_b)
+                                    # Special handling for switch_statement nodes - extract individual case statements
+                                    elif node_a.type == "switch_statement" and node_b.type == "switch_statement":
+                                        diff.child_diffs = self._compare_switch_statement_cases(node_a, node_b, source_a, source_b)
+                                    # Special handling for switch_block nodes - extract individual case statements
+                                    elif node_a.type == "switch_block" and node_b.type == "switch_block":
+                                        diff.child_diffs = self._compare_switch_block_cases(node_a, node_b, source_a, source_b)
                                     else:
                                         # Extract children from both nodes and compare recursively
                                         children_a = self._extract_container_children(node_a, source_a)
