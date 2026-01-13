@@ -164,8 +164,19 @@ class GroovyASTDiff:
             tree_a = self.parser.parse(source_a)
             tree_b = self.parser.parse(source_b)
             
-            if tree_a.root_node.has_error or tree_b.root_node.has_error:
-                return self._error_result("One or both sources have syntax errors")
+            # Check for actual ERROR nodes, not just the has_error flag (which can be false positive)
+            def has_actual_errors(node):
+                """Check for actual ERROR nodes in the AST."""
+                if node.type == 'ERROR':
+                    return True
+                return any(has_actual_errors(child) for child in node.children)
+            
+            if has_actual_errors(tree_a.root_node) or has_actual_errors(tree_b.root_node):
+                error_details = self._get_detailed_parsing_errors(
+                    tree_a, tree_b, source_a, source_b, file_a_path, file_b_path
+                )
+                if error_details:  # Only return error if actual errors were found
+                    return self._error_result(f"One or both sources have syntax errors: {error_details}")
             
             print("Extracting hierarchical signatures using recursive parser...")
             # Extract hierarchical signatures using recursive parser
@@ -2214,6 +2225,74 @@ class GroovyASTDiff:
     def _count_nodes_in_blocks(self, blocks: List[BlockSignature]) -> int:
         """Count total nodes across all blocks."""
         return sum(block.children_count for block in blocks)
+    
+    def _get_detailed_parsing_errors(self, tree_a, tree_b, source_a: bytes, source_b: bytes, 
+                                   file_a_path: str, file_b_path: str) -> str:
+        """Extract detailed parsing error information from both trees."""
+        errors = []
+        
+        def extract_errors_from_tree(tree, source: bytes, file_path: str, file_label: str):
+            """Extract error details from a single tree."""
+            file_errors = []
+            source_lines = source.decode('utf-8').splitlines()
+            
+            def find_errors(node, depth=0):
+                if node.type == 'ERROR':
+                    start_line = node.start_point[0] + 1
+                    start_col = node.start_point[1] + 1
+                    end_line = node.end_point[0] + 1
+                    end_col = node.end_point[1] + 1
+                    
+                    # Get the problematic text
+                    error_text = node.text.decode('utf-8', errors='replace')[:100]
+                    if len(error_text) > 100:
+                        error_text += "..."
+                    
+                    # Get context (line where error occurs)
+                    context_line = ""
+                    if start_line <= len(source_lines):
+                        context_line = source_lines[start_line - 1].strip()
+                    
+                    file_errors.append({
+                        'line': start_line,
+                        'column': start_col,
+                        'error_text': error_text.replace('\n', '\\n'),
+                        'context': context_line[:100] + ("..." if len(context_line) > 100 else "")
+                    })
+                
+                for child in node.children:
+                    find_errors(child, depth + 1)
+            
+            find_errors(tree.root_node)
+            
+            if file_errors:
+                error_details = []
+                for i, error in enumerate(file_errors[:5]):  # Limit to first 5 errors
+                    error_details.append(
+                        f"Line {error['line']}:{error['column']} - '{error['error_text']}' "
+                        f"(context: '{error['context']}')"
+                    )
+                
+                total_errors = len(file_errors)
+                if total_errors > 5:
+                    error_details.append(f"... and {total_errors - 5} more errors")
+                
+                errors.append(f"{file_label} ({file_path}): {'; '.join(error_details)}")
+        
+        # Check both trees for actual ERROR nodes
+        def has_actual_errors(node):
+            """Check for actual ERROR nodes in the AST."""
+            if node.type == 'ERROR':
+                return True
+            return any(has_actual_errors(child) for child in node.children)
+        
+        if has_actual_errors(tree_a.root_node):
+            extract_errors_from_tree(tree_a, source_a, file_a_path, "File A")
+        
+        if has_actual_errors(tree_b.root_node):
+            extract_errors_from_tree(tree_b, source_b, file_b_path, "File B")
+        
+        return " | ".join(errors) if errors else None
     
     def _error_result(self, error_message: str) -> ComparisonResult:
         """Create an error result."""

@@ -57,6 +57,3 @@ class FileInfoSimple(BaseModel):
     original_filename: str
     total_lines: int
     total_blocks: int
-    class_count: int
-    method_count: int
-    field_count: int

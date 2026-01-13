@@ -62,16 +62,9 @@ class GroovyComparisonService:
             blocks = self.groovy_differ._extract_top_level_blocks(root_node, bytes(content, "utf8"))
             
             # Count different types of blocks
-            class_count = sum(1 for block in blocks if 'class' in block.block_type.value.lower())
-            method_count = sum(1 for block in blocks if 'method' in block.block_type.value.lower())
-            field_count = sum(1 for block in blocks if 'field' in block.block_type.value.lower())
-            
             return {
                 "total_lines": total_lines,
                 "total_blocks": len(blocks),
-                "class_count": class_count,
-                "method_count": method_count,
-                "field_count": field_count,
             }
             
         except Exception as e:
@@ -79,7 +72,4 @@ class GroovyComparisonService:
             return {
                 "total_lines": total_lines,
                 "total_blocks": 0,
-                "class_count": 0,
-                "method_count": 0,
-                "field_count": 0,
             }

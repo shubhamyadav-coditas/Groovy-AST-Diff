@@ -84,19 +84,13 @@ async def compare_files(
         file_uuid=file_record_a.uuid,
         original_filename=file_record_a.original_filename,
         total_lines=analysis_a["total_lines"],
-        total_blocks=analysis_a["total_blocks"],
-        class_count=analysis_a["class_count"],
-        method_count=analysis_a["method_count"],
-        field_count=analysis_a["field_count"],
+        total_blocks=analysis_a["total_blocks"]
     )
     file_b_info = FileInfoSimple(
         file_uuid=file_record_b.uuid,
         original_filename=file_record_b.original_filename,
         total_lines=analysis_b["total_lines"],
-        total_blocks=analysis_b["total_blocks"],
-        class_count=analysis_b["class_count"],
-        method_count=analysis_b["method_count"],
-        field_count=analysis_b["field_count"],
+        total_blocks=analysis_b["total_blocks"]
     )
 
     # Build comparison summary

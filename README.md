@@ -331,19 +331,13 @@ class GroovyComparisonService:
     "file_uuid": "123e4567-e89b-12d3-a456-426614174000",
     "original_filename": "Calculator.groovy",
     "total_lines": 25,
-    "total_blocks": 3,
-    "class_count": 1,
-    "method_count": 2,
-    "field_count": 0
+    "total_blocks": 3
   },
   "file_b": {
     "file_uuid": "987fcdeb-51a2-43d7-b456-426614174001",
     "original_filename": "CalculatorModified.groovy",
     "total_lines": 35,
-    "total_blocks": 5,
-    "class_count": 1,
-    "method_count": 4,
-    "field_count": 0
+    "total_blocks": 5
   },
   "summary": {
     "is_identical": false,
