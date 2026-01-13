@@ -67,7 +67,10 @@ app/
 ### Prerequisites
 
 - Python 3.11+
-- Poetry
+- Poetry (0.21.3)
+- Tree-sitter CLI (0.20.8)
+
+> **Note**: `tree-sitter-cli` is a native binary and cannot be installed via poetry dependencies. It must be installed separately as a system dependency. On windows, use WSL for installing tree-sitter-cli
 
 ### Setup
 
