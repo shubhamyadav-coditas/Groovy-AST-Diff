@@ -41,6 +41,13 @@ module.exports = grammar({
     [$._callable_expression, $.juxt_function_call],
     [$._callable_expression, $._juxt_argument_list],
     [$._juxtable_expression, $._juxt_argument_list],
+    [$.enum_constant, $._juxtable_expression],
+    [$.enum_constant, $._callable_expression],
+    [$.argument_list, $.parameter_list],
+
+    // 👇 ADD THESE
+    [$.constructor_definition, $.function_definition],
+    [$.constructor_definition, $.function_declaration],
   ],
 
   rules: {
@@ -57,11 +64,14 @@ module.exports = grammar({
     _statement: $ => prec.left(PREC.STATEMENT, seq(
       optional($.label),
       choice(
+        $.constructor_definition,   // 👈 ADD THIS LINE
         $.assertion,
         $.groovy_import,
         $.groovy_package,
         $.assignment,
         $.class_definition,
+        $.enum_definition,
+        $.trait_definition,
         $.declaration,
         $.do_while_loop,
         $.for_in_loop,
@@ -218,6 +228,37 @@ module.exports = grammar({
         'extends',
         field('superclass', $._primary_expression),
       )),
+      field('body', $.closure),
+    ),
+
+    enum_definition: $ => seq(
+      repeat($.annotation),
+      optional($.access_modifier),
+      repeat($.modifier),
+      'enum',
+      field('name', choice($.identifier, $._type_identifier)),
+      '{',
+      optional(seq(
+        list_of($.enum_constant),
+        optional(';'),
+      )),
+      repeat($._statement),
+      '}'
+    ),
+
+    enum_constant: $ => prec.right(seq(
+      repeat($.annotation),
+      field('name', $.identifier),
+      optional($.argument_list),
+    )),
+
+    trait_definition: $ => seq(
+      repeat($.annotation),
+      optional($.access_modifier),
+      repeat($.modifier),
+      'trait',
+      field('name', choice($.identifier, $._type_identifier)),
+      optional(field('generics', $.generic_parameters)),
       field('body', $.closure),
     ),
 
@@ -468,6 +509,15 @@ module.exports = grammar({
       field('parameters', $.parameter_list),
       field('body', $.closure), //TODO: optional return
     )),
+
+    constructor_definition: $ => prec(4, seq(
+      repeat($.annotation),
+      optional($.access_modifier),
+      repeat($.modifier),
+      field('name', $._type_identifier),
+      field('parameters', $.parameter_list),
+      field('body', $.closure),
+    )),    
 
     identifier: $ => IDENTIFIER_REGEX,
     _type_identifier: $ => alias(TYPE_REGEX, $.identifier),
@@ -754,6 +804,13 @@ module.exports = grammar({
       'float',
       'double',
       'void',
+      'String',
+      'CharSequence',
+      'Integer',
+      'Long',
+      'Float',
+      'Double',
+      'Void',
     ),
 
     _type: $ => prec(2, choice(

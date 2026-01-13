@@ -70,21 +70,16 @@ class GroovyASTDiff:
     def _setup_parser(self):
         """Set up the Tree-sitter parser for Groovy."""
         try:
-            # Path to the built Groovy parser
-            parser_path = Path("parsers/tree-sitter-groovy")
+            # Path to the already built Groovy parser library
+            library_path = Path("build/groovy.so")
             
-            if not parser_path.exists():
+            if not library_path.exists():
                 raise FileNotFoundError(
-                    "Groovy parser not found. Please run 'python setup_parser.py' first."
+                    "Groovy parser library not found. Please run 'python setup_parser.py' first."
                 )
             
-            # Build the language from the parser
-            Language.build_library(
-                'build/groovy.so',
-                [str(parser_path)]
-            )
-            
-            self.language = Language('build/groovy.so', 'groovy')
+            # Use the already built library (don't rebuild it)
+            self.language = Language(str(library_path), 'groovy')
             self.parser = Parser()
             self.parser.set_language(self.language)
             
