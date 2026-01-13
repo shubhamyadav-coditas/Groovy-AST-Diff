@@ -266,7 +266,7 @@ Environment variables can be set in `.env` file:
 | `DATABASE_URL` | sqlite+aiosqlite:///./groovy_ast_diff.db | Database connection URL |
 | `UPLOAD_DIR` | uploads | Directory for uploaded files |
 | `MAX_FILE_SIZE` | 10485760 | Maximum file size (10MB) |
-| `ALLOW_ANY_FILE` | True | Accept any file type |
+| `ALLOW_ANY_FILE` | False | Accept any file type |
 
 ## Architecture
 
@@ -390,13 +390,7 @@ When encountering parsing errors:
 
 ## Testing with Sample Files
 
-The project includes test samples in the `test_samples/` directory:
-
-```bash
-# Test different change types using the CLI tool
-python groovy_ast_diff.py test_samples/added_before.groovy test_samples/added_after.groovy
-python groovy_ast_diff.py test_samples/modified_before.groovy test_samples/modified_after.groovy
-```
+The project includes test samples in the `test_samples/` directory
 
 ## Contributing
 

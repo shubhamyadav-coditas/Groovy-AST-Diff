@@ -38,13 +38,13 @@ class Settings(BaseSettings):
     # File Upload (with defaults)
     UPLOAD_DIR: str = "uploads"
     MAX_FILE_SIZE: int = 10485760  # 10MB
-    ALLOW_ANY_FILE: bool = True
+    ALLOW_ANY_FILE: bool = False
 
     # AST Parser Configuration (with defaults)
     AST_LANGUAGE_NAME: str = "groovy"
 
     # Allowed extensions (not from .env - constant)
-    ALLOWED_EXTENSIONS: ClassVar[set[str]] = {".groovy", ".gradle"}
+    ALLOWED_EXTENSIONS: ClassVar[set[str]] = {".groovy"}
 
     @property
     def DATABASE_URL(self) -> str:
