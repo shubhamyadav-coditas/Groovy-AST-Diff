@@ -27,8 +27,6 @@ GROOVY_RECURSIVE_CONTAINERS = {
     # NOTE: "case" remains in GROOVY_LEAF_STATEMENTS to prevent infinite recursion
     "switch_default",
     "try_statement",
-    "catch_clause",
-    "finally_clause",
     
     # Loop containers (CORRECTED node types)
     "for_loop",           # FIXED: was for_statement
@@ -321,7 +319,19 @@ class GroovyRecursiveParser:
         elif parent_type == "switch_statement":
             return "SWITCH_BODY"
         elif parent_type == "try_statement":
-            return "TRY_BODY"
+            # Determine which part of the try-catch-finally this closure belongs to
+            try_body = parent.child_by_field_name("body")
+            catch_body = parent.child_by_field_name("catch_body")
+            finally_body = parent.child_by_field_name("finally_body")
+            
+            if closure_node == try_body:
+                return "TRY_BODY"
+            elif closure_node == catch_body:
+                return "CATCH_BODY"
+            elif closure_node == finally_body:
+                return "FINALLY_BODY"
+            else:
+                return "TRY_BODY"  # fallback
         elif parent_type in ["catch", "finally"]:
             return f"{parent_type.upper()}_BODY"
         elif parent_type in ["function_call", "juxt_function_call"]:
@@ -751,20 +761,18 @@ class GroovyRecursiveParser:
         # Try-catch-finally
         elif node_type == "try_statement":
             body = node.child_by_field_name("body")
-            handler = node.child_by_field_name("handler")
-            finalizer = node.child_by_field_name("finalizer")
+            catch_body = node.child_by_field_name("catch_body")
+            finally_body = node.child_by_field_name("finally_body")
             
             if body:
                 children.extend(self._get_block_statements(body))
-            if handler:
-                children.append(handler)
-            if finalizer:
-                children.append(finalizer)
+            if catch_body:
+                children.extend(self._get_block_statements(catch_body))
+            if finally_body:
+                children.extend(self._get_block_statements(finally_body))
         
-        elif node_type in {"catch_clause", "finally_clause"}:
-            body = node.child_by_field_name("body")
-            if body:
-                children.extend(self._get_block_statements(body))
+        # Note: catch_clause and finally_clause are now handled directly in try_statement
+        # to avoid double processing since they're accessed via field names
         
         # Block containers
         elif node_type in {"block", "statement_block"}:

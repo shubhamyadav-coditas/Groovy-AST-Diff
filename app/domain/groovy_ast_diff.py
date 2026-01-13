@@ -834,6 +834,12 @@ class GroovyASTDiff:
                 if node_a.type == "if_statement" and node_b.type == "if_statement":
                     return self._compare_if_statement_branches(node_a, node_b, source_a, source_b)
                 
+                # Special handling for try_statement nodes - use branch-aware analysis
+                print(f"DEBUG: Checking try_statement: node_a.type={node_a.type}, node_b.type={node_b.type}")
+                if node_a.type == "try_statement" and node_b.type == "try_statement":
+                    print("DEBUG: Using try_statement branch-aware analysis")
+                    return self._compare_try_statement_branches(node_a, node_b, source_a, source_b)
+                
                 # For other containers, use generic approach
                 return self._compare_container_contents_directly(node_a, node_b, source_a, source_b)
             
@@ -1478,6 +1484,160 @@ class GroovyASTDiff:
                 })
         
         return branches
+
+    def _compare_try_statement_branches(
+        self,
+        node_a,
+        node_b,
+        source_a: bytes,
+        source_b: bytes
+    ) -> List[StatementDiff]:
+        """
+        Compare try_statement nodes using branch-aware analysis similar to JavaScript POC.
+        
+        This method extracts and compares individual branches (try, catch, finally)
+        and detects changes at the branch level.
+        """
+        diffs = []
+        
+        # Extract branches from both nodes
+        branches_a = self._extract_try_branches(node_a, source_a)
+        branches_b = self._extract_try_branches(node_b, source_b)
+        
+        # Track which branches have been matched
+        matched_a = set()
+        matched_b = set()
+        
+        # Phase 1: Match by branch type (try, catch, finally)
+        for i, branch_a in enumerate(branches_a):
+            if i in matched_a:
+                continue
+                
+            for j, branch_b in enumerate(branches_b):
+                if j in matched_b:
+                    continue
+                
+                # Match by branch type
+                if branch_a["branch_type"] == branch_b["branch_type"]:
+                    
+                    # Compare body statements
+                    body_diffs = self._compare_statement_lists_generic(
+                        branch_a["statements"], branch_b["statements"], source_a, source_b
+                    )
+                    
+                    if not body_diffs:
+                        # Unchanged branch
+                        change_type = StatementChangeType.UNCHANGED
+                        desc = f"{branch_a['branch_type']} block unchanged"
+                    else:
+                        # Modified branch body
+                        change_type = StatementChangeType.MODIFIED
+                        desc = f"{branch_a['branch_type']} block modified"
+                    
+                    branch_label = branch_a['branch_type']
+                    if branch_a['branch_type'] == 'catch' and branch_a.get('exception_type'):
+                        branch_label += f"({branch_a['exception_type']})"
+                    
+                    diffs.append(StatementDiff(
+                        change_type=change_type,
+                        code=branch_b["code"],
+                        node_type=f"{branch_a['branch_type']}_block",
+                        file_a_line=branch_a["start_line"],
+                        file_a_index=i,
+                        file_b_line=branch_b["start_line"],
+                        file_b_index=j,
+                        description=desc,
+                        old_code=branch_a["code"],
+                        branch_label=branch_label,
+                        is_container=True,
+                        child_diffs=body_diffs
+                    ))
+                    
+                    matched_a.add(i)
+                    matched_b.add(j)
+                    break
+        
+        # Phase 2: Handle unmatched branches (added/deleted)
+        for i, branch_a in enumerate(branches_a):
+            if i not in matched_a:
+                diffs.append(StatementDiff(
+                    change_type=StatementChangeType.DELETED,
+                    code="",
+                    node_type=f"{branch_a['branch_type']}_block",
+                    file_a_line=branch_a["start_line"],
+                    file_a_index=i,
+                    description=f"Deleted {branch_a['branch_type']} block",
+                    old_code=branch_a["code"],
+                    branch_label=branch_a['branch_type'],
+                    is_container=True
+                ))
+        
+        for j, branch_b in enumerate(branches_b):
+            if j not in matched_b:
+                diffs.append(StatementDiff(
+                    change_type=StatementChangeType.ADDED,
+                    code=branch_b["code"],
+                    node_type=f"{branch_b['branch_type']}_block",
+                    file_b_line=branch_b["start_line"],
+                    file_b_index=j,
+                    description=f"Added {branch_b['branch_type']} block",
+                    branch_label=branch_b['branch_type'],
+                    is_container=True
+                ))
+        
+        return diffs
+
+    def _extract_try_branches(self, try_node, source: bytes) -> List[Dict]:
+        """
+        Extract try, catch, and finally branches from a try_statement node.
+        """
+        branches = []
+        
+        # Extract try body
+        try_body = try_node.child_by_field_name("body")
+        if try_body:
+            try_statements = self._get_block_statements_from_node(try_body)
+            branches.append({
+                "branch_type": "try",
+                "code": source[try_body.start_byte:try_body.end_byte].decode('utf-8'),
+                "start_line": try_body.start_point[0] + 1,
+                "end_line": try_body.end_point[0] + 1,
+                "statements": try_statements
+            })
+        
+        # Extract catch body
+        catch_body = try_node.child_by_field_name("catch_body")
+        if catch_body:
+            catch_statements = self._get_block_statements_from_node(catch_body)
+            
+            # Try to extract exception type from catch clause
+            exception_type = None
+            catch_exception = try_node.child_by_field_name("catch_exception")
+            if catch_exception:
+                exception_type = source[catch_exception.start_byte:catch_exception.end_byte].decode('utf-8')
+            
+            branches.append({
+                "branch_type": "catch",
+                "code": source[catch_body.start_byte:catch_body.end_byte].decode('utf-8'),
+                "start_line": catch_body.start_point[0] + 1,
+                "end_line": catch_body.end_point[0] + 1,
+                "statements": catch_statements,
+                "exception_type": exception_type
+            })
+        
+        # Extract finally body
+        finally_body = try_node.child_by_field_name("finally_body")
+        if finally_body:
+            finally_statements = self._get_block_statements_from_node(finally_body)
+            branches.append({
+                "branch_type": "finally",
+                "code": source[finally_body.start_byte:finally_body.end_byte].decode('utf-8'),
+                "start_line": finally_body.start_point[0] + 1,
+                "end_line": finally_body.end_point[0] + 1,
+                "statements": finally_statements
+            })
+        
+        return branches
     
     def _compare_statement_lists_generic(
         self,
@@ -1495,8 +1655,14 @@ class GroovyASTDiff:
         # Convert nodes to StatementSignature objects
         sigs_a = []
         for i, stmt in enumerate(statements_a):
-            code = source_a[stmt.start_byte:stmt.end_byte].decode('utf-8', errors='replace')
-            identifier = self._extract_statement_identifier(stmt, source_a) or self._extract_identifier(stmt, source_a) or f"anonymous_{stmt.type}"
+            print(f"DEBUG: Processing statement {i}: type={type(stmt)}, hasattr start_byte={hasattr(stmt, 'start_byte')}")
+            if hasattr(stmt, 'start_byte'):
+                code = source_a[stmt.start_byte:stmt.end_byte].decode('utf-8', errors='replace')
+                identifier = self._extract_statement_identifier(stmt, source_a) or self._extract_identifier(stmt, source_a) or f"anonymous_{stmt.type}"
+            else:
+                # This is likely a StatementSignature object, not a tree-sitter node
+                print(f"DEBUG: Statement is not a tree-sitter node: {stmt}")
+                continue
             
             sigs_a.append(StatementSignature(
                 content_hash=hash_content(code),

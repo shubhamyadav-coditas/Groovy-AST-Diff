@@ -658,15 +658,15 @@ def get_groovy_children_to_parse(node, source_bytes: bytes, context: Dict[str, A
     # =========================================================================
     elif node_type == "try_statement":
         body = node.child_by_field_name("body")
-        handler = node.child_by_field_name("handler")
-        finalizer = node.child_by_field_name("finalizer")
+        catch_body = node.child_by_field_name("catch_body")
+        finally_body = node.child_by_field_name("finally_body")
         
         if body:
             children.append(body)
-        if handler:
-            children.append(handler)
-        if finalizer:
-            children.append(finalizer)
+        if catch_body:
+            children.append(catch_body)
+        if finally_body:
+            children.append(finally_body)
     
     elif node_type == "catch_clause":
         body = node.child_by_field_name("body")
