@@ -835,9 +835,7 @@ class GroovyASTDiff:
                     return self._compare_if_statement_branches(node_a, node_b, source_a, source_b)
                 
                 # Special handling for try_statement nodes - use branch-aware analysis
-                print(f"DEBUG: Checking try_statement: node_a.type={node_a.type}, node_b.type={node_b.type}")
                 if node_a.type == "try_statement" and node_b.type == "try_statement":
-                    print("DEBUG: Using try_statement branch-aware analysis")
                     return self._compare_try_statement_branches(node_a, node_b, source_a, source_b)
                 
                 # For other containers, use generic approach
@@ -1655,13 +1653,11 @@ class GroovyASTDiff:
         # Convert nodes to StatementSignature objects
         sigs_a = []
         for i, stmt in enumerate(statements_a):
-            print(f"DEBUG: Processing statement {i}: type={type(stmt)}, hasattr start_byte={hasattr(stmt, 'start_byte')}")
             if hasattr(stmt, 'start_byte'):
                 code = source_a[stmt.start_byte:stmt.end_byte].decode('utf-8', errors='replace')
                 identifier = self._extract_statement_identifier(stmt, source_a) or self._extract_identifier(stmt, source_a) or f"anonymous_{stmt.type}"
             else:
                 # This is likely a StatementSignature object, not a tree-sitter node
-                print(f"DEBUG: Statement is not a tree-sitter node: {stmt}")
                 continue
             
             sigs_a.append(StatementSignature(
