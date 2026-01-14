@@ -287,8 +287,9 @@ class GroovyASTDiff:
                 
                 # Use the method call node as the base but with extended code
                 signature = self.recursive_parser.parse_recursive(method_call_node, source)
-                # Override the code to include the closure
+                # Override the code to include the closure and recalculate content hash
                 signature.code = combined_code
+                signature.content_hash = self.recursive_parser._hash_content(combined_code)
                 signatures.append(signature)
                 
                 # Skip the next node (closure) since we processed it

@@ -117,13 +117,14 @@ module.exports = grammar({
 
     dotted_identifier: $ =>
       prec.left(1, seq(
-        choice($._primary_expression, $._type_identifier),
+        choice($._primary_expression, $._type_identifier, $.closure),
         repeat1(seq(
         '.',
         choice(
           $.identifier,
           $._type_identifier,
           $.parenthesized_expression,
+          $.string,
         ))),
       )),
 
@@ -517,7 +518,7 @@ module.exports = grammar({
       field('name', $._type_identifier),
       field('parameters', $.parameter_list),
       field('body', $.closure),
-    )),    
+    )),
 
     identifier: $ => IDENTIFIER_REGEX,
     _type_identifier: $ => alias(TYPE_REGEX, $.identifier),
