@@ -2,7 +2,7 @@
 
 ## ALL Possible Code Blocks Inside Groovy Classes/Methods/Scripts
 
-This is an exhaustive reference of every possible code construct that can appear within Groovy classes, methods, scripts, and closures, including Emery DSL patterns.
+This is an exhaustive reference of every possible code construct that can appear within Groovy classes, methods, scripts, and closures, including Emery DSL patterns. This document reflects the current implementation in `GroovyRecursiveParser` and `GroovyASTDiff`.
 
 ---
 
@@ -65,13 +65,18 @@ class Outer {
 
 **AST Structure:**
 ```
-class_definition (Outer)
+class_definition (Outer)  ← CONTAINER in GROOVY_RECURSIVE_CONTAINERS
 └── class_body
-    ├── class_definition (Inner)  ← CONTAINER, RECURSE
+    ├── class_definition (Inner)  ← CONTAINER, RECURSE via _get_parseable_children()
     │   └── class_body
-    │       └── method_definition
-    └── method_definition
+    │       └── method_definition  ← CONTAINER, RECURSE
+    └── method_definition  ← CONTAINER, RECURSE
 ```
+
+**Implementation Details:**
+- Handled by `node_type in {"class_definition", "interface_definition", "trait_definition", "enum_definition", "annotation_definition"}` in `_get_parseable_children()`
+- Uses `node.child_by_field_name("body")` to extract class body
+- Recursively processes all named children within the body
 
 ### 1.2 Classes Inside Methods
 
@@ -162,13 +167,19 @@ def outerMethod() {
 }
 ```
 
+**Implementation Details:**
+- Function types in `GROOVY_FUNCTION_TYPES`: `function_definition`, `method_definition`, `constructor_definition`
+- Uses `node.child_by_field_name("body")` to extract function body
+- If body is `block` or `statement_block`, processes all named children
+- Single statement bodies are processed directly
+
 ### 2.2 Function Expressions and Assignments
 
 ```groovy
 def outerMethod() {
     // ✅ Function assigned to variable
     def func = { param ->
-        // closure body → RECURSE
+        // closure body → CONTEXT-AWARE (REAL_CLOSURE = PURE)
     }
     
     // ✅ Method reference assignment
@@ -176,19 +187,25 @@ def outerMethod() {
     
     // ✅ Nested function with multiple parameters
     def multiParam = { a, b, c ->
-        return a + b + c  // body → RECURSE
+        return a + b + c  // body → CONTEXT-AWARE (REAL_CLOSURE = PURE)
     }
     
     // ✅ Function returning function (currying)
     def curry = { a ->
         return { b ->
             return { c ->
-                return a + b + c  // nested closures → RECURSE
+                return a + b + c  // nested closures → CONTEXT-AWARE
             }
         }
     }
 }
 ```
+
+**Implementation Details:**
+- Closures are handled context-aware via `_get_closure_context()`
+- Real closures (functional context) are treated as pure statements
+- Structural closures (class/method bodies) are recursed into
+- Context types: `REAL_CLOSURE`, `CLASS_BODY`, `FUNCTION_BODY`, etc.
 
 ### 2.3 Constructor Patterns
 
@@ -214,18 +231,18 @@ class MyClass {
 
 ## 3. Closures - All Types
 
-### 3.1 Basic Closure Patterns
+### 3.1 Basic Closure Patterns (Context-Aware)
 
 ```groovy
 def closurePatterns() {
-    // ✅ Simple closure
+    // ✅ Simple closure (REAL_CLOSURE context)
     def simple = {
-        println "Hello"  // body → RECURSE
+        println "Hello"  // body → PURE (not recursed)
     }
     
-    // ✅ Closure with parameter
+    // ✅ Closure with parameter (REAL_CLOSURE context)
     def withParam = { param ->
-        println param  // body → RECURSE
+        println param  // body → PURE (not recursed)
     }
     
     // ✅ Closure with multiple parameters
@@ -371,7 +388,7 @@ def nestedClosures() {
 
 ## 4. Control Flow - IF/ELSE
 
-### 4.1 Basic If Statements (Branch-Aware Analysis)
+### 4.1 Basic If Statements (Container-Based Analysis)
 
 ```groovy
 def controlFlow() {
@@ -382,12 +399,12 @@ def controlFlow() {
     
     // ✅ if-else
     if (condition) {
-        // consequence → RECURSE (if branch)
+        // consequence → RECURSE (container-based)
     } else {
-        // alternative → RECURSE (else branch)
+        // alternative → RECURSE (container-based)
     }
     
-    // ✅ if-else if-else (Branch-aware: separate if/else-if/else analysis)
+    // ✅ if-else if-else (Container-based: treats as nested if statements)
     if (condition1) {
         // if branch → RECURSE
     } else if (condition2) {
@@ -413,15 +430,21 @@ def controlFlow() {
 }
 ```
 
-**AST Structure (Branch-Aware):**
+**AST Structure (Container-Based):**
 ```
-if_statement
+if_statement  ← CONTAINER in GROOVY_RECURSIVE_CONTAINERS
 ├── condition (parenthesized_expression)
-├── body (statement_block | single_statement)  ← IF BRANCH
-└── else_body (statement_block | if_statement | null)
+├── body (statement_block | single_statement)  ← RECURSE via _get_block_statements()
+└── else_body (statement_block | if_statement | null)  ← RECURSE via _get_block_statements()
     ├── if_statement (for else-if)  ← ELSE-IF BRANCH
     └── statement_block             ← ELSE BRANCH
 ```
+
+**Implementation Details:**
+- `if_statement` is in `GROOVY_RECURSIVE_CONTAINERS`
+- Uses `node.child_by_field_name("body")` and `node.child_by_field_name("else_body")`
+- Processes statements within each branch via `_get_block_statements()`
+- **Note:** Uses container-based comparison, not individual branch extraction like JavaScript
 
 ### 4.2 Groovy-Specific If Patterns
 
@@ -633,16 +656,16 @@ def switchStatements() {
     // ✅ Basic switch with cases
     switch (value) {
         case 1:
-            // statements → RECURSE
+            // statements → PURE (case is leaf node)
             break
         case 2:
-            // statements → RECURSE
+            // statements → PURE (case is leaf node)
             break
         case 3:
-            // statements → RECURSE
+            // statements → PURE (case is leaf node)
             break
         default:
-            // statements → RECURSE
+            // statements → PURE (switch_default is leaf node)
     }
     
     // ✅ Fall-through cases
@@ -674,16 +697,22 @@ def switchStatements() {
 
 **AST Structure:**
 ```
-switch_statement
+switch_statement  ← CONTAINER in GROOVY_RECURSIVE_CONTAINERS
 ├── value (parenthesized_expression)
-└── switch_block
-    ├── case
-    │   └── statements...  ← RECURSE into each
+└── switch_block  ← CONTAINER in GROOVY_RECURSIVE_CONTAINERS
+    ├── case  ← LEAF in GROOVY_LEAF_STATEMENTS (prevents infinite recursion)
+    │   └── statements...  ← NOT recursed (case is pure statement)
     ├── case
     │   └── statements...
     └── default
         └── statements...
 ```
+
+**Implementation Details:**
+- `switch_statement` and `switch_block` are in `GROOVY_RECURSIVE_CONTAINERS`
+- `case` and `switch_default` are in `GROOVY_LEAF_STATEMENTS` to prevent infinite recursion
+- Switch statement uses `node.child_by_field_name("body")` to get switch_block
+- Switch block processes named children (cases) but cases are treated as pure statements
 
 ### 6.2 Groovy-Specific Switch Patterns
 
@@ -792,15 +821,21 @@ def tryCatch() {
 
 **AST Structure:**
 ```
-try_statement
-├── body (statement_block)  ← RECURSE
+try_statement  ← CONTAINER in GROOVY_RECURSIVE_CONTAINERS
+├── body (statement_block)  ← RECURSE via _get_block_statements()
 ├── catch_clause
 │   ├── parameter (identifier or pattern)
-│   └── body (statement_block)  ← RECURSE
+│   └── body (statement_block)  ← RECURSE via _get_block_statements()
 ├── catch_clause (multiple possible)
 └── finally_clause
-    └── body (statement_block)  ← RECURSE
+    └── body (statement_block)  ← RECURSE via _get_block_statements()
 ```
+
+**Implementation Details:**
+- `try_statement` is in `GROOVY_RECURSIVE_CONTAINERS`
+- Uses field names: `body`, `catch_body`, `finally_body` via `child_by_field_name()`
+- Each section (try, catch, finally) is processed via `_get_block_statements()`
+- Multiple catch clauses are handled individually
 
 ### 7.2 Groovy-Specific Try Patterns
 
@@ -1628,9 +1663,59 @@ When implementing recursive parsing for Groovy, ensure you handle:
 
 - **Closure Method Call Combination** (semantic units)
 - **Context-Aware Closure Handling** (structural vs functional)
-- **Branch-Aware If Analysis** (individual branch comparison)
-- **Emery DSL Pattern Recognition** (specialized constructs)
+- **Container-Based Analysis** (recursive container comparison for all control structures)
+- **Context-Aware Closure Handling** (structural vs functional closure distinction)
+- **Depth-Limited Recursion** (max depth of 10 to prevent infinite loops)
+- **Leaf Node Detection** (GROOVY_LEAF_STATEMENTS stops recursion)
+- **Emery DSL Compatibility** (handled as standard Groovy constructs)
 - **Enhanced Identifier Extraction** (dotted, member access)
 - **Groovy Syntax Adaptations** (for-in, elvis, safe navigation)
-- **Collection Method Chaining** (fluent interfaces)
+- **Collection Method Support** (each method treated as separate statement)
 - **Meta-Programming Support** (dynamic method/property handling)
+
+---
+
+## Implementation Summary
+
+### Current Groovy Implementation vs JavaScript Reference
+
+**Key Similarities:**
+- ✅ Recursive parsing down to pure statements
+- ✅ Multi-phase matching strategy
+- ✅ Hierarchical diff structure with nested containers
+- ✅ Support for complex nested structures
+
+**Key Differences:**
+- ❌ **No tree-sitter query optimization** (uses manual traversal)
+- ❌ **No individual branch extraction** (uses container-based comparison)
+- ❌ **No callback method combination** (treats each statement separately)
+- ✅ **Context-aware closure handling** (prevents infinite recursion)
+- ✅ **Depth limiting** (configurable max depth protection)
+
+### Recursion Control Strategy
+
+The Groovy implementation uses multiple layers of recursion protection:
+
+1. **Depth Limiting**: Maximum recursion depth of 10 levels (configurable)
+2. **Leaf Node Detection**: `GROOVY_LEAF_STATEMENTS` set stops recursion
+3. **Context-Aware Closures**: Distinguishes structural vs functional closures
+4. **Special Case Handling**: Switch cases treated as leaf nodes to prevent infinite loops
+
+### Container vs Leaf Classification
+
+**Containers (GROOVY_RECURSIVE_CONTAINERS):**
+- `class_definition`, `interface_definition`, `trait_definition`, `enum_definition`
+- `function_definition`, `method_definition`, `constructor_definition`
+- `if_statement`, `switch_statement`, `switch_block`, `try_statement`
+- `for_loop`, `for_in_loop`, `while_loop`, `do_while_loop`
+- `block`, `statement_block`
+- `closure` (context-dependent), `closure_expression`
+
+**Leaf Nodes (GROOVY_LEAF_STATEMENTS):**
+- `expression_statement`, `return_statement`, `throw_statement`
+- `break_statement`, `continue_statement`, `assert_statement`
+- `import_statement`, `package_statement`
+- `variable_declaration`, `field_declaration`, `declaration`
+- `case`, `switch_default` (special handling to prevent infinite recursion)
+
+This implementation provides comprehensive coverage of Groovy constructs while maintaining performance and preventing infinite recursion through careful container/leaf classification.

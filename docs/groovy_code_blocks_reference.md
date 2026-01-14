@@ -10,76 +10,82 @@ This document provides a comprehensive reference of all Groovy code blocks that 
 
 ### 🔵 CONTAINER NODES (Require Recursion)
 
-These nodes contain other statements and must be parsed recursively:
+These nodes contain other statements and must be parsed recursively (from `GROOVY_RECURSIVE_CONTAINERS`):
 
-| Node Type | Example | Children to Parse |
-|-----------|---------|-------------------|
-| `class_definition` | `class Foo {}` | `body` (class members) |
-| `interface_definition` | `interface Bar {}` | `body` (interface members) |
-| `trait_definition` | `trait Mixable {}` | `body` (trait members) |
-| `enum_definition` | `enum Status {}` | `body` (enum constants/methods) |
-| `annotation_definition` | `@interface MyAnnotation {}` | `body` |
-| `method_definition` | `def methodName() {}` | `body` (statement_block) |
-| `function_definition` | `def functionName() {}` | `body` |
-| `constructor_definition` | `Constructor() {}` | `body` |
-| `if_statement` | `if (cond) {} else {}` | `body`, `else_body` |
-| `switch_statement` | `switch (x) {}` | `body` (switch_block) |
-| `switch_block` | `switch body container` | `case`, `default` statements |
-| `case` | `case 1:` | statements after colon |
-| `for_loop` | `for (i in 0..10) {}` | `body` |
-| `for_in_loop` | `for (item in collection) {}` | `body` |
-| `while_loop` | `while (condition) {}` | `body` |
-| `do_while_statement` | `do {} while()` | `body` |
-| `try_statement` | `try {} catch {}` | `body`, `catch_clause`, `finally_clause` |
-| `catch_clause` | `catch (Exception e) {}` | `body` |
-| `finally_clause` | `finally {}` | `body` |
-| `statement_block` | `{ ... }` | all child statements |
-| `block` | `{ ... }` | all child statements |
-| `closure` | `{ it > 0 }` | body (context-aware) |
-| `closure_expression` | `list.findAll { condition }` | closure body |
-| `synchronized_statement` | `synchronized (obj) {}` | `body` |
-| `labeled_statement` | `label: stmt` | `body` |
+| Node Type | Example | Children to Parse | Implementation |
+|-----------|---------|-------------------|----------------|
+| `class_definition` | `class Foo {}` | `body` (class members) | `child_by_field_name("body")` |
+| `interface_definition` | `interface Bar {}` | `body` (interface members) | `child_by_field_name("body")` |
+| `trait_definition` | `trait Mixable {}` | `body` (trait members) | `child_by_field_name("body")` |
+| `enum_definition` | `enum Status {}` | `body` (enum constants/methods) | `child_by_field_name("body")` |
+| `annotation_definition` | `@interface MyAnnotation {}` | `body` | `child_by_field_name("body")` |
+| `method_definition` | `def methodName() {}` | `body` (statement_block) | `child_by_field_name("body")` |
+| `function_definition` | `def functionName() {}` | `body` | `child_by_field_name("body")` |
+| `constructor_definition` | `Constructor() {}` | `body` | `child_by_field_name("body")` |
+| `if_statement` | `if (cond) {} else {}` | `body`, `else_body` | `_get_block_statements()` |
+| `switch_statement` | `switch (x) {}` | `body` (switch_block) | `child_by_field_name("body")` |
+| `switch_block` | `switch body container` | named children (cases) | `named_children` |
+| `for_loop` | `for (i in 0..10) {}` | `body` | `child_by_field_name("body")` |
+| `for_in_loop` | `for (item in collection) {}` | `body` | `child_by_field_name("body")` |
+| `while_loop` | `while (condition) {}` | `body` | `child_by_field_name("body")` |
+| `do_while_loop` | `do {} while()` | `body` | `child_by_field_name("body")` |
+| `do_while_statement` | `do {} while()` | `body` | `child_by_field_name("body")` |
+| `try_statement` | `try {} catch {}` | `body`, `catch_body`, `finally_body` | Field-based extraction |
+| `statement_block` | `{ ... }` | all child statements | `named_children` |
+| `block` | `{ ... }` | all child statements | `named_children` |
+| `closure` | `{ it > 0 }` | body (context-aware) | Context detection via `_get_closure_context()` |
+| `closure_expression` | `list.findAll { condition }` | closure body | Context-aware |
+| `else_clause` | `else {}` | body | `_get_block_statements()` |
+| `switch_default` | `default:` | statements | Special handling |
+| `synchronized_statement` | `synchronized (obj) {}` | `body` | `child_by_field_name("body")` |
+| `labeled_statement` | `label: stmt` | `body` | `child_by_field_name("statement")` |
 
 ### 🟢 PURE STATEMENTS (Leaf Nodes - Stop Recursion)
 
-These are atomic statements that don't contain nested blocks:
+These are atomic statements that don't contain nested blocks (from `GROOVY_LEAF_STATEMENTS`):
 
-| Node Type | Example | Notes |
-|-----------|---------|-------|
-| `expression_statement` | `println "Hello"` | Method calls, assignments |
-| `return_statement` | `return value` | May have expression |
-| `throw_statement` | `throw new Exception()` | Has expression |
-| `break_statement` | `break` | Optional label |
-| `continue_statement` | `continue` | Optional label |
-| `assert_statement` | `assert condition` | Groovy assertion |
-| `import_statement` | `import java.util.List` | Module import |
-| `package_statement` | `package com.example` | Package declaration |
-| `variable_declaration` | `def x = value` | Simple variable |
-| `field_declaration` | `private String field` | Class field |
-| `empty_statement` | `;` | Just semicolon |
+| Node Type | Example | Notes | Reason for Leaf Status |
+|-----------|---------|-------|------------------------|
+| `expression_statement` | `println "Hello"` | Method calls, assignments | Atomic statement |
+| `return_statement` | `return value` | May have expression | Atomic statement |
+| `throw_statement` | `throw new Exception()` | Has expression | Atomic statement |
+| `break_statement` | `break` | Optional label | Atomic statement |
+| `continue_statement` | `continue` | Optional label | Atomic statement |
+| `assert_statement` | `assert condition` | Groovy assertion | Atomic statement |
+| `import_statement` | `import java.util.List` | Module import | Atomic statement |
+| `package_statement` | `package com.example` | Package declaration | Atomic statement |
+| `variable_declaration` | `def x = value` | Simple variable | Atomic statement |
+| `field_declaration` | `private String field` | Class field | Atomic statement |
+| `empty_statement` | `;` | Just semicolon | Atomic statement |
+| `declaration` | `def x = value` | Groovy declarations | Atomic in grammar |
+| `case` | `case 1: statements` | Switch case | **Prevents infinite recursion** |
 
-### 🟡 DECLARATION NODES (May Contain Functions/Closures)
+### 🟡 DECLARATION NODES (Block Type Mapping)
 
-These need special handling - check if value contains function or closure:
+These are mapped to specific block types in `GROOVY_NODE_TYPE_TO_BLOCK_TYPE`:
 
-| Node Type | Example | Check For |
-|-----------|---------|-----------|
-| `declaration` | `def x = { closure }` | Closure/function in value |
-| `assignment` | `x = { it > 0 }` | Closure/function in value |
-| `field_definition` | `def field = { closure }` | Closure as field value |
-| `property_definition` | `String prop = getValue()` | Method call or closure |
+| Node Type | Example | Maps To | Notes |
+|-----------|---------|---------|-------|
+| `declaration` | `def x = { closure }` | `BlockType.DECLARATION` | Leaf node in `GROOVY_LEAF_STATEMENTS` |
+| `assignment` | `x = { it > 0 }` | `BlockType.EXPRESSION` | Assignment operations |
+| `field_definition` | `def field = { closure }` | `BlockType.FIELD` | Class field definitions |
+| `property_definition` | `String prop = getValue()` | `BlockType.PROPERTY` | Property definitions |
+| `variable_definition` | `String var = value` | `BlockType.FIELD` | Variable definitions |
 
-### 🔮 EMERY DSL NODES (Special Handling)
+### 🔮 EMERY DSL NODES (Block Type Mapping)
 
-Emery-specific constructs that require enhanced parsing:
+Emery-specific constructs mapped to standard block types in `GROOVY_NODE_TYPE_TO_BLOCK_TYPE`:
 
-| Node Type | Example | Special Handling |
-|-----------|---------|------------------|
-| `binary_op` | `F.rows << newRow` | Left-hand identifier extraction |
-| `function_call` | `Emery.form.newForm()` | Dotted function name extraction |
-| `dotted_identifier` | `F.fieldName` | Emery field access |
-| `member_access` | `F.skillsMultiRow.rows` | Nested field access |
-| `juxt_function_call` | `println value` | Groovy-style function call |
+| Node Type | Example | Maps To | Implementation Notes |
+|-----------|---------|---------|---------------------|
+| `binary_op` | `F.rows << newRow` | `BlockType.EXPRESSION` | Standard expression handling |
+| `function_call` | `Emery.form.newForm()` | `BlockType.EXPRESSION` | Standard expression handling |
+| `juxt_function_call` | `println value` | `BlockType.FUNCTION_CALL` | Groovy-style function call |
+| `method_call` | `obj.method()` | `BlockType.FUNCTION_CALL` | Method invocation |
+| `assignment` | `F.fieldName = value` | `BlockType.EXPRESSION` | Assignment operations |
+| `increment_op` | `counter++` | `BlockType.EXPRESSION` | Increment/decrement |
+
+**Note:** Emery DSL constructs are handled as standard Groovy syntax - no special DSL-specific parsing logic.
 
 ---
 
@@ -154,39 +160,39 @@ program (root)
 │   ├── while_loop                  → body
 │   └── do_while_statement          → body
 │
-├── GROOVY CLOSURES (Context-Aware Handling)
+├── GROOVY CLOSURES (Context-Aware via _get_closure_context())
 │   ├── closure
-│   │   └── [Check context: structural block vs functional closure]
-│   │       ├── Structural (method body) → RECURSE
-│   │       └── Functional (callback)   → PURE or RECURSE based on complexity
+│   │   └── [Context Detection]
+│   │       ├── CLASS_BODY/FUNCTION_BODY/etc. → Parse children directly (structural)
+│   │       └── REAL_CLOSURE → PURE (treated as pure statement)
 │   │
 │   ├── closure_expression
-│   │   └── [Usually functional - check for nested statements]
+│   │   └── [Context-aware - usually PURE for functional closures]
 │   │
 │   └── Collection Methods with Closures
-│       ├── list.findAll { condition }   ← Combined as single statement
-│       ├── list.collect { transform }   ← Combined as single statement
-│       ├── list.each { action }         ← Combined as single statement
-│       └── map.collectEntries { }       ← Combined as single statement
+│       ├── list.findAll { condition }   ← Separate statements (not combined)
+│       ├── list.collect { transform }   ← Separate statements (not combined)
+│       ├── list.each { action }         ← Separate statements (not combined)
+│       └── map.collectEntries { }       ← Separate statements (not combined)
 │
-├── EMERY DSL CONSTRUCTS (Special Parsing)
+├── EMERY DSL CONSTRUCTS (Standard Groovy Handling)
 │   ├── Form Operations
-│   │   ├── F.fieldName              ← dotted_identifier
-│   │   ├── F.skillsMultiRow.rows    ← member_access
-│   │   └── F.rows << newRow         ← binary_op (left-hand extraction)
+│   │   ├── F.fieldName              ← assignment (BlockType.EXPRESSION)
+│   │   ├── F.skillsMultiRow.rows    ← assignment (BlockType.EXPRESSION)
+│   │   └── F.rows << newRow         ← binary_op (BlockType.EXPRESSION)
 │   │
 │   ├── Emery Function Calls
-│   │   ├── Emery.form.newForm()     ← function_call (dotted)
-│   │   ├── Emery.dataTable.read()   ← function_call (dotted)
-│   │   ├── Emery.mdos.getMdos()     ← function_call (dotted)
-│   │   └── Emery.test.assertEquals() ← function_call (dotted)
+│   │   ├── Emery.form.newForm()     ← function_call (BlockType.EXPRESSION)
+│   │   ├── Emery.dataTable.read()   ← function_call (BlockType.EXPRESSION)
+│   │   ├── Emery.mdos.getMdos()     ← function_call (BlockType.EXPRESSION)
+│   │   └── Emery.test.assertEquals() ← function_call (BlockType.EXPRESSION)
 │   │
 │   ├── Typed Declarations
-│   │   ├── USER_PROFILE_FORM obj = ... ← Combined identifier + assignment
-│   │   └── EMPLOYEE_FORM emp = ...     ← Combined identifier + assignment
+│   │   ├── USER_PROFILE_FORM obj = ... ← declaration (BlockType.DECLARATION)
+│   │   └── EMPLOYEE_FORM emp = ...     ← declaration (BlockType.DECLARATION)
 │   │
 │   └── Use Statements
-│       └── use("EMERY_UTILITIES")   ← function_call
+│       └── use("EMERY_UTILITIES")   ← juxt_function_call (BlockType.FUNCTION_CALL)
 │
 └── EXPRESSIONS (Check for closures/callbacks)
     ├── expression_statement
@@ -804,28 +810,56 @@ obj.method("param")                // method_call (with parentheses)
 
 ---
 
-## Summary
+## Implementation Summary
 
-When implementing recursive parsing for Groovy:
+### Current Groovy Implementation Details
 
-1. **Start at program root** and extract top-level declarations, classes, methods
-2. **Check each node type** against Groovy container/pure classification
-3. **For containers**, get child nodes and recurse appropriately
-4. **For declarations**, check if value contains closures or functions
-5. **For pure statements**, compute hash and stop recursion
-6. **Handle Groovy closures** with context-aware analysis (structural vs functional)
-7. **Combine method calls with closures** for semantic accuracy
-8. **Handle Emery DSL constructs** with specialized identifier extraction
-9. **Use branch-aware if analysis** for detailed control flow comparison
-10. **Track depth and path** for context in hierarchical diffs
-11. **Handle typed declarations** by combining type identifiers with assignments
-12. **Apply Groovy-specific node type corrections** (for_loop vs for_statement)
+**Core Classification Sets:**
+- `GROOVY_RECURSIVE_CONTAINERS`: 25 container types that require recursion
+- `GROOVY_LEAF_STATEMENTS`: 12 leaf types that stop recursion
+- `GROOVY_NODE_TYPE_TO_BLOCK_TYPE`: Maps tree-sitter nodes to BlockType enums
 
-### Key Groovy-Specific Features:
+**Recursion Control:**
+1. **Depth limiting**: Maximum recursion depth of 10 levels (configurable)
+2. **Context-aware closures**: `_get_closure_context()` distinguishes structural vs functional
+3. **Leaf node detection**: `case` statements are leaf nodes to prevent infinite recursion
+4. **Special handling**: Switch blocks are containers but cases within are pure
 
-- **Context-aware closure handling** (structural blocks vs functional closures)
-- **Collection method combination** (method + closure as single statement)
-- **Emery DSL pattern recognition** (F.fieldName, binary operations, typed declarations)
-- **Branch-aware if statement analysis** (individual if/else-if/else comparison)
-- **Enhanced identifier extraction** (dotted identifiers, member access, function calls)
-- **Groovy syntax adaptations** (for-in loops, juxt function calls, implicit parameters)
+**Key Implementation Methods:**
+- `_get_parseable_children()`: Extracts children for each container type
+- `_get_closure_context()`: Determines closure context (CLASS_BODY, REAL_CLOSURE, etc.)
+- `_get_block_statements()`: Handles block vs single statement bodies
+- `child_by_field_name()`: Accesses specific fields (body, else_body, etc.)
+
+### Actual vs Documented Behavior
+
+**✅ Correctly Implemented:**
+- Context-aware closure handling (structural blocks parsed, functional closures treated as pure)
+- Multi-phase matching strategy with similarity thresholds
+- Hierarchical diff structure with nested containers
+- Depth limiting and recursion protection
+
+### Node Type Mapping Examples
+
+```python
+# From GROOVY_NODE_TYPE_TO_BLOCK_TYPE
+"juxt_function_call": BlockType.FUNCTION_CALL,  # println "text"
+"function_call": BlockType.EXPRESSION,          # Math.max(5, 10)
+"binary_op": BlockType.EXPRESSION,              # F.rows << newRow
+"declaration": BlockType.DECLARATION,           # def x = value
+"case": # In GROOVY_LEAF_STATEMENTS (not mapped to BlockType)
+```
+
+### Context Detection Logic
+
+```python
+def _get_closure_context(self, closure_node):
+    parent_type = closure_node.parent.type
+    if parent_type == "class_definition":
+        return "CLASS_BODY"  # Structural - recurse
+    elif parent_type in ["function_call", "juxt_function_call"]:
+        return "REAL_CLOSURE"  # Functional - pure statement
+    # ... other contexts
+```
+
+This implementation provides comprehensive Groovy AST parsing while maintaining performance through careful recursion control and context-aware handling of language-specific constructs.

@@ -9,7 +9,6 @@ This document describes the recursive approach for parsing Groovy source files d
 | Extension | Description |
 |-----------|-------------|
 | `.groovy` | Standard Groovy source files |
-| `.gradle` | Gradle build scripts (Groovy-based) |
 
 ---
 
@@ -49,14 +48,14 @@ This document describes the recursive approach for parsing Groovy source files d
         ┌─────────────────────────────────────────────────────┐
         │         MULTI-PHASE BLOCK MATCHING                  │
         │   Phase 1: Identifier → Phase 2: Content Hash      │
-        │   Phase 3: Structural Similarity → Phase 4: Unmatched│
+        │   Phase 3: Similarity (≥70%) → Phase 4: Unmatched  │
         └─────────────────────┬───────────────────────────────┘
                               │
                               ▼
         ┌─────────────────────────────────────────────────────┐
         │         RECURSIVE STATEMENT EXTRACTION              │
-        │     (For modified blocks: drill down to pure        │
-        │      statements using GroovyRecursiveParser)        │
+        │     (For modified blocks: drill down with depth     │
+        │      limiting using GroovyRecursiveParser)          │
         └─────────────────────┬───────────────────────────────┘
                               │
                               ▼
@@ -410,7 +409,6 @@ GROOVY_RECURSIVE_CONTAINERS = {
                             ▼
     ┌─────────────────────────────────────────────────────────────────────────┐
     │                   RECURSIVE STATEMENT ANALYSIS                          │
-    │                   (For MODIFIED blocks only)                            │
     └─────────────────────────────────────────────────────────────────────────┘
                             │
                             ▼
@@ -576,9 +574,10 @@ Branch Extraction:
         │  children_b = extract_children(nodeB)                             │
         │                                                                   │
         │  Multi-phase matching on children:                                │
-        │    Phase 0: Identifier matching                                   │
-        │    Phase 1: Content hash matching                                 │
-        │    Phase 2: Structural similarity matching                        │
+        │    Phase 1: Identifier matching (same type + name)               │
+        │    Phase 2: Content hash matching (exact content → MOVED)        │
+        │    Phase 3: Similarity matching (≥70% → MODIFIED)                │
+        │    Phase 4: Remaining unmatched → ADDED/DELETED                   │
         │                                                                   │
         │  For each matched pair (childA, childB):                          │
         │      compare_recursive(childA, childB)                            │
@@ -983,26 +982,72 @@ COMPARISON OUTPUT:
 
 ---
 
-## Summary
+## Implementation Summary
 
-The Groovy recursive parsing approach:
+### Current Groovy Recursive Parsing Implementation
+
+The Groovy recursive parsing approach follows these key principles:
 
 1. **Starts at the root** (program node) using tree-sitter-groovy
 2. **Extracts top-level blocks** (classes, methods, fields, variables, expressions)
-3. **Applies multi-phase matching** (identifier → content hash → structural similarity)
+3. **Applies multi-phase matching** (identifier → content hash → similarity ≥70%)
 4. **For modified blocks**, recursively parses children using `GroovyRecursiveParser`
-5. **Continues until pure statements** are reached (leaf nodes)
+5. **Continues until pure statements** are reached (leaf nodes) with depth limiting
 6. **Computes multiple hash types** (content, structure, body) for comparison
 7. **Generates hierarchical diffs** showing exactly what changed at each nesting level
 
-### Key Groovy-Specific Features:
+### Key Implementation Features:
 
-- **Closure method call combination**: Treats `list.findAll { condition }` as single statement
-- **Emery DSL support**: Handles custom language constructs like `F.fieldName` and typed declarations
-- **Branch-aware if analysis**: Compares if/else if/else branches individually like JavaScript POC
-- **Context-aware closure handling**: Distinguishes structural blocks from functional closures
-- **Groovy collection methods**: Properly handles `.each{}`, `.collect{}`, `.findAll{}` patterns
-- **Enhanced identifier extraction**: Supports dotted identifiers, member access, and function calls
+**Recursion Control:**
+- **Leaf node detection**: `GROOVY_LEAF_STATEMENTS` stops recursion
+- **Special case handling**: Switch cases are leaf nodes to prevent infinite loops
+- **Context-aware closures**: `_get_closure_context()` distinguishes structural vs functional
+
+**Multi-Phase Matching:**
+- **Phase 1**: Identifier matching (same type + name)
+- **Phase 2**: Content hash matching (exact content → MOVED)
+- **Phase 3**: Similarity matching (≥70% → MODIFIED/MOVED_MODIFIED)
+- **Phase 4**: Remaining unmatched → ADDED/DELETED
+
+**Groovy-Specific Handling:**
+- **Context-aware closure handling**: Structural blocks parsed, functional closures treated as pure
+- **Emery DSL compatibility**: Uses standard Groovy node type mappings
+- **Container-based comparison**: If statements use container approach, not individual branch extraction
+- **Collection methods**: Each method treated as separate statement (not combined with closures)
+
+**Data Structures:**
+- `RecursiveNodeSignature`: Hierarchical signatures with depth, path, children
+- `GROOVY_RECURSIVE_CONTAINERS`: 25 container types requiring recursion
+- `GROOVY_LEAF_STATEMENTS`: 12 leaf types that stop recursion
+
+### Differences from JavaScript Implementation:
+
+**✅ Similarities:**
+- Recursive parsing down to pure statements
+- Multi-phase matching strategy
+- Hierarchical diff structure with nested containers
+- Hash-based comparison (content, structure, body)
+
+
+### Recursion Protection Mechanisms:
+
+```python
+# 1. Leaf node detection
+if node_type in GROOVY_LEAF_STATEMENTS:
+    return signature(is_pure_statement=True)
+
+# 2. Context-aware closure handling
+if node_type == "closure":
+    context = _get_closure_context(node)
+    if context == "REAL_CLOSURE":
+        return signature(is_pure_statement=True)  # Don't recurse
+    else:  # Structural block
+        parse_children_directly()  # Skip closure wrapper
+
+# 3. Special case handling
+if node_type == "case":  # Always leaf to prevent infinite loops
+    return signature(is_pure_statement=True)
+```
 
 This provides fine-grained comparison that can detect:
 - Moved statements within methods/classes

@@ -17,9 +17,9 @@ flowchart TD
 
     subgraph RECURSIVE["🔄 Recursive Extraction"]
         C1["Extract Top-Level<br/>Blocks"]
-        C2["Combine Method Calls<br/>with Closures"]
-        C3["Handle Typed<br/>Declarations"]
-        C4{"Is Container<br/>Node?"}
+        C2["Check Recursion<br/>Depth (max=10)"]
+        C3{"Is Container<br/>Node?"}
+        C4["Context-Aware<br/>Closure Handling"]
         C5["Parse Children<br/>Recursively"]
         C6["Mark as<br/>Pure Statement"]
         C7["Compute<br/>Node Hash"]
@@ -27,10 +27,10 @@ flowchart TD
     end
 
     subgraph COMPARE["⚖️ Multi-Phase Comparison"]
-        D1["Phase 1: Match by<br/>Identifier"]
-        D2["Phase 2: Match by<br/>Content Hash"]
-        D3["Phase 3: Match by<br/>Structural Similarity<br/>(Hybrid Best-Match)"]
-        D4["Phase 4: Process<br/>Unmatched (Added/Deleted)"]
+        D1["Phase 1: Match by<br/>Identifier (exact name)"]
+        D2["Phase 2: Match by<br/>Content Hash (MOVED)"]
+        D3["Phase 3: Match by<br/>Structural Similarity (≥70%)"]
+        D4["Phase 4: Process<br/>Unmatched (ADDED/DELETED)"]
         D5["Generate<br/>Hierarchical Diff"]
     end
 
@@ -46,13 +46,13 @@ flowchart TD
     B3 --> C1
     C1 --> C2
     C2 --> C3
-    C3 --> C4
-    C4 -->|Yes| C5
-    C4 -->|No| C6
+    C3 -->|Yes| C4
+    C3 -->|No| C6
+    C4 --> C5
     C5 --> C7
     C6 --> C7
     C7 --> C8
-    C5 --> C4
+    C5 --> C2
     C8 --> D1
     D1 --> D2
     D2 --> D3
@@ -71,27 +71,32 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    START["🔍 Examine Node"] --> CHECK{"Node Type?"}
+    START["🔍 Examine Node"] --> DEPTH_CHECK{"Depth > 10?"}
     
-    CHECK -->|"class_definition<br/>interface_definition<br/>trait_definition"| CLASS["📦 CLASS<br/>Container"]
+    DEPTH_CHECK -->|Yes| MAX_DEPTH["⚠️ Max Depth<br/>Treat as Pure"]
+    DEPTH_CHECK -->|No| CHECK{"Node Type?"}
+    
+    CHECK -->|"class_definition<br/>interface_definition<br/>trait_definition<br/>enum_definition<br/>annotation_definition"| CLASS["📦 CLASS<br/>Container"]
     CHECK -->|"method_definition<br/>function_definition<br/>constructor_definition"| FUNC["📦 METHOD<br/>Container"]
-    CHECK -->|"if_statement<br/>switch_statement<br/>try_statement"| CONTROL["📦 CONTROL FLOW<br/>Container"]
-    CHECK -->|"for_loop<br/>while_loop<br/>for_in_loop"| LOOP["📦 LOOP<br/>Container"]
-    CHECK -->|"closure<br/>(context-aware)"| CLOSURE["📦 CLOSURE<br/>Container/Statement"]
+    CHECK -->|"if_statement<br/>else_clause<br/>switch_statement<br/>switch_block<br/>try_statement"| CONTROL["📦 CONTROL FLOW<br/>Container"]
+    CHECK -->|"for_loop<br/>for_in_loop<br/>while_loop<br/>do_while_loop"| LOOP["📦 LOOP<br/>Container"]
+    CHECK -->|"closure<br/>closure_expression"| CLOSURE["📦 CLOSURE<br/>Context-Aware"]
     CHECK -->|"expression_statement<br/>return_statement<br/>throw_statement"| PURE["🍃 PURE<br/>Statement"]
     CHECK -->|"break_statement<br/>continue_statement<br/>assert_statement"| PURE
-    CHECK -->|"import_statement<br/>package_statement<br/>variable_declaration"| PURE
+    CHECK -->|"import_statement<br/>package_statement<br/>variable_declaration<br/>field_declaration<br/>declaration"| PURE
+    CHECK -->|"case<br/>(CRITICAL: prevents loops)"| PURE
     
     CLASS --> RECURSE["↻ Recurse into body"]
     FUNC --> RECURSE
     CONTROL --> RECURSE
     LOOP --> RECURSE
-    CLOSURE --> CONTEXT_CHECK{"Check Context"}
+    CLOSURE --> CONTEXT_CHECK{"Check Closure Context"}
     
-    CONTEXT_CHECK -->|"Structural Block"| RECURSE
-    CONTEXT_CHECK -->|"Functional Closure"| HASH["#️⃣ Compute Hash"]
+    CONTEXT_CHECK -->|"CLASS_BODY<br/>FUNCTION_BODY<br/>IF_STATEMENT_BODY<br/>etc."| RECURSE
+    CONTEXT_CHECK -->|"REAL_CLOSURE<br/>(passed to functions)"| HASH["#️⃣ Compute Hash"]
     
     PURE --> HASH
+    MAX_DEPTH --> HASH
     RECURSE --> CHILDREN["Get child nodes"]
     CHILDREN --> START
     
@@ -404,17 +409,17 @@ flowchart TD
         
         METHOD_TYPES["🔧 Method Types<br/>• method_definition<br/>• function_definition<br/>• constructor_definition"]
         
-        CONTROL_TYPES["🎛️ Control Flow<br/>• if_statement<br/>• switch_statement<br/>• switch_block<br/>• case<br/>• try_statement<br/>• catch_clause<br/>• finally_clause"]
+        CONTROL_TYPES["🎛️ Control Flow<br/>• if_statement<br/>• else_clause<br/>• switch_statement<br/>• switch_block<br/>• switch_default<br/>• try_statement"]
         
-        LOOP_TYPES["🔄 Loop Types<br/>• for_loop<br/>• for_in_loop<br/>• while_loop<br/>• do_while_statement"]
+        LOOP_TYPES["🔄 Loop Types<br/>• for_loop<br/>• for_in_loop<br/>• while_loop<br/>• do_while_loop<br/>• do_while_statement"]
         
-        BLOCK_TYPES["📋 Block Types<br/>• statement_block<br/>• block"]
+        BLOCK_TYPES["📋 Block Types<br/>• statement_block<br/>• block<br/>• synchronized_statement<br/>• labeled_statement"]
         
         GROOVY_TYPES["🎯 Groovy-Specific<br/>• closure (context-aware)<br/>• closure_expression"]
     end
     
     subgraph LEAF_STATEMENTS["🍃 GROOVY_LEAF_STATEMENTS"]
-        PURE_TYPES["🔚 Pure Statements<br/>• expression_statement<br/>• return_statement<br/>• throw_statement<br/>• break_statement<br/>• continue_statement<br/>• assert_statement<br/>• import_statement<br/>• package_statement<br/>• variable_declaration<br/>• field_declaration<br/>• empty_statement"]
+        PURE_TYPES["🔚 Pure Statements<br/>• expression_statement<br/>• return_statement<br/>• throw_statement<br/>• break_statement<br/>• continue_statement<br/>• assert_statement<br/>• import_statement<br/>• package_statement<br/>• variable_declaration<br/>• field_declaration<br/>• declaration<br/>• empty_statement<br/>• case (CRITICAL: prevents loops)"]
     end
     
     subgraph BLOCK_TYPE_MAPPING["🗺️ Block Type Mapping"]
@@ -474,17 +479,20 @@ sequenceDiagram
     CLI->>Extractor: _extract_recursive_signatures(AST_A)
     
     loop For each top-level node
-        Extractor->>Combiner: check for method+closure combination
-        Combiner->>Combiner: detect typed declarations
-        Combiner-->>Extractor: enhanced signatures
+        Extractor->>Extractor: check recursion depth (max=10)
         
-        Extractor->>Extractor: is_container?
-        alt Container Node
-            Extractor->>Extractor: get_parseable_children()
-            Extractor->>Extractor: parse_recursive()
-        else Pure Statement
-            Extractor->>Extractor: compute_hashes()
-            Extractor->>Extractor: return signature
+        alt Depth > 10
+            Extractor->>Extractor: treat as pure statement
+        else Normal Processing
+            Extractor->>Extractor: context-aware closure handling
+            Extractor->>Extractor: is_container?
+            alt Container Node
+                Extractor->>Extractor: get_parseable_children()
+                Extractor->>Extractor: parse_recursive()
+            else Pure Statement
+                Extractor->>Extractor: compute_hashes()
+                Extractor->>Extractor: return signature
+            end
         end
     end
     
@@ -718,6 +726,62 @@ flowchart TD
 
 ---
 
+## Implementation Summary
+
+### Current Groovy Recursive Parsing Implementation
+
+This documentation reflects the actual implementation in GroovyRecursiveParser and GroovyASTDiff as of the latest codebase analysis.
+
+#### Core Features
+
+1. **Depth Limiting (max_depth=10)**
+   - Critical safety mechanism to prevent infinite recursion
+   - Nodes beyond max depth are treated as pure statements
+   - Configurable parameter with sensible default
+
+2. **Context-Aware Closure Handling**
+   - `_get_closure_context()` determines closure behavior
+   - Structural closures (CLASS_BODY, FUNCTION_BODY, etc.) → Containers (recurse)
+   - Functional closures (REAL_CLOSURE) → Pure statements (stop recursion)
+   - Prevents infinite loops while maintaining accuracy
+
+3. **Multi-Phase Matching Strategy**
+   - **Phase 1**: Match by identifier (exact name match)
+   - **Phase 2**: Match by content hash (exact content → MOVED)
+   - **Phase 3**: Match by structural similarity (≥70% → MODIFIED)
+   - **Phase 4**: Process unmatched blocks (ADDED/DELETED)
+
+4. **Accurate Node Classifications**
+   - `GROOVY_RECURSIVE_CONTAINERS`: Containers that need recursion
+   - `GROOVY_LEAF_STATEMENTS`: Pure statements that stop recursion
+   - Special handling: `case` statements are leaf nodes (prevents infinite loops)
+
+#### Key Differences from JavaScript Implementation
+
+1. **No Zhang-Shasha Algorithm**: Uses custom similarity calculation
+2. **Context-Aware Closures**: JavaScript doesn't have this concept
+3. **Groovy-Specific Node Types**: Different tree-sitter grammar
+4. **Emery DSL Support**: Domain-specific language handling
+5. **Manual Traversal**: No tree-sitter queries, uses manual node traversal
+
+#### Recursion Protection Mechanisms
+
+1. **Max Depth Limiting**: Prevents runaway recursion
+2. **Case Statement Classification**: Prevents infinite loops in switch statements
+3. **Context-Aware Closures**: Functional closures don't recurse
+4. **Leaf Node Detection**: Pure statements immediately stop recursion
+
+#### Performance Optimizations
+
+1. **Early Termination**: Pure statements stop recursion immediately
+2. **Hash-Based Comparison**: Content and structure hashes for efficiency
+3. **Context Caching**: Closure contexts computed once and reused
+4. **Depth Tracking**: Efficient depth management during traversal
+
+This implementation provides robust, context-aware recursive parsing for Groovy with proper handling of closures, Emery DSL constructs, and comprehensive recursion protection.
+
+---
+
 ## Usage
 
 These Mermaid diagrams can be rendered in:
@@ -740,9 +804,10 @@ mmdc -i recursive_parsing_mermaid.md -o groovy_ast_diff_diagrams.png
 ## Key Differences from JavaScript Implementation
 
 1. **Groovy-Specific Node Types**: Uses actual tree-sitter-groovy node types (e.g., `for_loop` instead of `for_statement`)
-2. **Closure Method Call Combination**: Handles Groovy collection methods with closures as single statements
-3. **Emery DSL Support**: Specialized handling for custom DSL constructs
-4. **Typed Declaration Handling**: Combines type identifiers with assignments
-5. **Branch-Aware If Analysis**: Individual comparison of if/else if/else branches
-6. **Multi-Phase Hybrid Matching**: Enhanced Phase 3 with best-match finder
-7. **Context-Aware Closure Handling**: Distinguishes structural blocks from functional closures
+2. **Context-Aware Closure Handling**: Distinguishes structural blocks from functional closures using `_get_closure_context()`
+3. **Emery DSL Support**: Specialized handling for custom DSL constructs (uses standard Groovy node mappings)
+4. **Depth Limiting**: Configurable max_depth (default 10) with safety mechanisms
+5. **Case Statement Protection**: `case` nodes are leaf statements to prevent infinite recursion
+6. **Multi-Phase Matching**: 4-phase strategy with custom similarity calculation (no Zhang-Shasha)
+7. **Manual Traversal**: Uses `_get_parseable_children()` instead of tree-sitter queries
+8. **Method+Closure Combination**: Limited combination logic for Groovy collection methods (not a separate phase)
