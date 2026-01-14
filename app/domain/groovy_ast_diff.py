@@ -46,7 +46,7 @@ from .groovy_domain import (
     ComparisonResult, GroovyASTNode,
     calculate_similarity, normalize_code, hash_content
 )
-from .groovy_recursive_parser import GroovyRecursiveParser
+from .groovy_recursive_parser import GroovyRecursiveParser, RecursiveNodeSignature
 
 
 class GroovyASTDiff:
@@ -227,6 +227,44 @@ class GroovyASTDiff:
                 signatures.append(signature)
                 
                 # Skip the next node (assignment) since we processed it
+                i += 2
+                continue
+            
+            # Handle println-style function calls: identifier followed by function_call
+            # This fixes cases like: println add(5, 3) -> should be treated as single statement
+            if (child.type == 'identifier' and 
+                i + 1 < len(children) and 
+                children[i + 1].type == 'function_call'):
+                
+                # Combine the identifier (println) and function_call (add(5, 3)) into a single statement
+                identifier_node = child
+                function_call_node = children[i + 1]
+                
+                # Create a synthetic juxt_function_call that spans both nodes
+                combined_start = identifier_node.start_byte
+                combined_end = function_call_node.end_byte
+                combined_code = source[combined_start:combined_end].decode('utf-8', errors='replace')
+                
+                # Create a signature for the combined statement
+                signature = RecursiveNodeSignature(
+                    node_type="juxt_function_call",
+                    identifier=source[identifier_node.start_byte:identifier_node.end_byte].decode('utf-8', errors='replace'),
+                    content_hash=self.recursive_parser._hash_content(combined_code),
+                    structure_hash=self.recursive_parser._hash_structure("juxt_function_call", []),
+                    body_hash=None,
+                    start_line=identifier_node.start_point[0] + 1,
+                    end_line=function_call_node.end_point[0] + 1,
+                    depth=0,
+                    parent_hash=None,
+                    path="/juxt_function_call",
+                    children=[],
+                    is_pure_statement=True,
+                    is_container=False,
+                    code=combined_code,
+                )
+                signatures.append(signature)
+                
+                # Skip the next node (function_call) since we processed it
                 i += 2
                 continue
             
