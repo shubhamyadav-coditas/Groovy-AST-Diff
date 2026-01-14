@@ -4,10 +4,11 @@
 
 This document describes all scenarios covered by the Groovy AST Comparison service in this codebase. The system provides comprehensive comparison capabilities for Groovy code including:
 
-1. **Block-Level Comparison** - Top-level structure comparison (classes, methods, closures)
-2. **Recursive Comparison** - Deep nested structure comparison with statement-level analysis
+1. **Block-Level Comparison** (`GroovyASTDiff`) - Top-level structure comparison (classes, methods, closures)
+2. **Recursive Comparison** (`GroovyRecursiveParser`) - Deep nested structure comparison with statement-level analysis
 3. **Emery DSL Support** - Specialized handling for Emery language constructs
-4. **Branch-Aware Analysis** - Individual if/else-if/else branch comparison
+4. **Multi-Phase Matching Strategy** - Sophisticated matching with 4 distinct phases
+5. **Hierarchical Diff Structure** - Nested diffs showing container relationships
 
 ---
 
@@ -22,7 +23,7 @@ This document describes all scenarios covered by the Groovy AST Comparison servi
 7. [Closure & Collection Method Detection](#closure--collection-method-detection)
 8. [Groovy-Specific Patterns](#groovy-specific-patterns)
 9. [Emery DSL Scenarios](#emery-dsl-scenarios)
-10. [Performance Optimizations](#performance-optimizations)
+10. [Response Structure](#response-structure)
 
 ---
 
@@ -149,13 +150,15 @@ println add(5, 3, 6)
 **Covered:** Sophisticated matching with multiple phases for optimal accuracy.
 
 **Matching Phases:**
-1. **Phase 0:** Match by identifier (exact name match)
-2. **Phase 1:** Match by content hash (exact content match → MOVED)
-3. **Phase 2:** Match moved blocks by identifier with different position
-4. **Phase 3:** Hybrid similarity matching:
-   - First pass: High-confidence matches (≥90% similarity)
-   - Second pass: Best match for remaining blocks
-5. **Phase 4:** Remaining unmatched → ADDED/DELETED
+1. **Phase 1:** Match by identifier (exact name match for same type)
+2. **Phase 2:** Match by content hash (exact content match → MOVED)
+3. **Phase 3:** Match by structural similarity (≥70% similarity → MODIFIED/MOVED_MODIFIED)
+4. **Phase 4:** Remaining unmatched → ADDED/DELETED
+
+**Implementation Details:**
+- Uses `_compare_blocks()` method in `GroovyASTDiff` class
+- Recursive matching in `GroovyRecursiveParser._compare_container_children()`
+- Similarity threshold of 0.7 (70%) for modified block detection
 
 ### Scenario 4: Structural Similarity Scoring
 
@@ -177,8 +180,9 @@ println add(5, 3, 6)
 // File A
 USER_PROFILE_FORM formObj = Emery.form.newForm("USER_PROFILE_FORM")
 
-// File B - MOVED_MODIFIED
-EMPLOYEE_FORM empForm = Emery.form.newForm("EMPLOYEE_FORM")
+// File B
+
+USER_PROFILE_FORM formObj = Emery.form.newForm("EMPLOYEE_FORM")
 ```
 
 ---
@@ -265,23 +269,30 @@ class Outer {
 }
 ```
 
-### Scenario 10: Closure Detection in Method Calls
+### Scenario 10: Closure Detection and Context Analysis
 
-**Covered:** Detects closures passed as parameters and combined with method calls.
+**Covered:** Context-aware closure handling distinguishing structural vs functional closures.
 
 ```groovy
-// Collection methods with closures (Combined as single statements)
+// Functional closures (treated as pure statements)
 list.findAll { item -> item > 2 }
 list.collect { item -> item * 2 }
 list.each { item -> println item }
 
-// Nested closures
-list.groupBy { item ->
-    item.category
-}.each { category, items ->
-    processCategory(category, items)
+// Structural closures (treated as containers for recursion)
+class MyClass {
+    // This closure is a structural block, not a functional closure
+    def method() {
+        // Method body statements
+    }
 }
 ```
+
+**Implementation Details:**
+- Uses `_get_closure_context()` to determine closure type
+- Structural closures (CLASS_BODY, FUNCTION_BODY, etc.) are parsed recursively
+- Functional closures (REAL_CLOSURE) are treated as pure statements
+- Context detection prevents infinite recursion in structural blocks
 
 ### Scenario 11: Method-in-Method Detection
 
@@ -329,9 +340,9 @@ class Calculator {
 
 ## Control Flow Scenarios
 
-### Scenario 13: Branch-Aware If-Else-If Analysis
+### Scenario 13: If-Else-If Chain Comparison
 
-**Covered:** Individual branch comparison for if/else-if/else statements.
+**Covered:** Recursive comparison of if/else-if/else statements as containers.
 
 ```groovy
 // File A
@@ -344,21 +355,19 @@ if (x > 10) {
 }
 
 // File B - Branches reordered and modified
-if (x > 5) {           // MOVED from position 1 to 0
+if (x > 5) {           // Different condition
     println "medium"
-} else if (x > 10) {   // MOVED from position 0 to 1
+} else if (x > 10) {   // Different condition
     println "very large"  // MODIFIED body
 } else {
     println "small"       // UNCHANGED
 }
 ```
 
-**Branch Matching Strategy:**
-1. Extract individual if/else-if/else branches
-2. Match by condition hash → UNCHANGED/MOVED
-3. Match by condition similarity → MODIFIED/MOVED_MODIFIED
-4. Match else blocks by type
-5. Remaining unmatched → ADDED/DELETED
+**Implementation Details:**
+- If statements are treated as containers in `GROOVY_RECURSIVE_CONTAINERS`
+- Uses `_get_parseable_children()` to extract if/else bodies
+- Recursive comparison via `GroovyRecursiveParser.compare_recursive_statements()`
 
 ### Scenario 14: Switch Statement Comparison
 
@@ -392,8 +401,6 @@ try {
     riskyOperation()
 } catch (IOException e) {
     handleIOError(e)
-} catch (RuntimeException e) {
-    handleRuntimeError(e)
 } finally {
     cleanup()
 }
@@ -444,29 +451,31 @@ The system recognizes closures in these Groovy collection methods:
 | **Grouping** | `groupBy`, `countBy` |
 | **Unique** | `unique`, `uniqueBy` |
 
-### Collection Method Closure Detection
+### Collection Method Handling
 
-**Covered:** All collection methods with closures are combined as single semantic units.
+**Covered:** Collection methods with closures are treated as expression statements.
 
 ```groovy
-// These are treated as single combined statements:
+// These are treated as expression statements (not combined):
 def filtered = list.findAll { item ->
-    return item.isActive && item.value > 10  // Closure body → RECURSE
+    return item.isActive && item.value > 10  // Closure treated as pure statement
 }
 
 def transformed = list.collect { item ->
-    return [id: item.id, name: item.name.toUpperCase()]  // Closure body → RECURSE
+    return [id: item.id, name: item.name.toUpperCase()]  // Closure treated as pure statement
 }
 
-// Chained collection methods
+// Method chaining
 def result = list
-    .findAll { it.active }      // Each method+closure combined
+    .findAll { it.active }      // Each line is a separate expression
     .collect { it.transform() }
     .groupBy { it.category }
-    .collectEntries { k, v ->
-        [k, v.size()]
-    }
 ```
+
+**Implementation Details:**
+- Collection methods are mapped to `BlockType.EXPRESSION` in `GROOVY_NODE_TYPE_TO_BLOCK_TYPE`
+- Closures in functional contexts are treated as pure statements to avoid deep recursion
+- No special "combination" logic - each statement is analyzed independently
 
 ### Closure Context Analysis
 
@@ -579,47 +588,58 @@ def methodMissing(String name, args) {
 
 ### Scenario 22: Form Field Operations
 
-**Covered:** Specialized handling for Emery form field access patterns.
+**Covered:** Emery form field access patterns handled as expressions.
 
 ```groovy
-// Form field access (Combined: F.fieldName)
+// Form field access (treated as expressions)
 F.userName = "john.doe"
 F.userAge = 25
 
-// Nested field access (Combined: F.skillsMultiRow.rows)
+// Nested field access
 F.skillsMultiRow.rows.each { row ->
-    processSkillRow(row)  // Closure → RECURSE
+    processSkillRow(row)  // Closure treated as pure statement
 }
 
-// Binary operations (Combined: F.rows << newRow)
+// Binary operations (mapped to expressions)
 F.skillsMultiRow.rows << newRow1
 F.skillsMultiRow.rows << newRow2
 ```
 
+**Implementation Details:**
+- `F.fieldName` patterns are handled as regular assignment expressions
+- Binary operations (`<<`) are mapped to `BlockType.EXPRESSION`
+- No special "combination" logic for Emery constructs
+- Uses standard expression handling from `GROOVY_NODE_TYPE_TO_BLOCK_TYPE`
+
 ### Scenario 23: Emery Data Operations
 
-**Covered:** Handles Emery data table and MDOS operations.
+**Covered:** Emery data table and MDOS operations handled as declarations and expressions.
 
 ```groovy
-// Data table operations (Combined: Emery.dataTable.read())
+// Data table operations (treated as variable declarations)
 def countryData = Emery.dataTable.read("COUNTRY_DATA_TABLE")
 def statusData = Emery.dataTable.read("STATUS_LOOKUP_TABLE")
 
 // Data processing with closures
 def activeCountries = countryData.findAll { row ->
-    return row.isActive == true  // Filter closure → RECURSE
+    return row.isActive == true  // Closure treated as pure statement
 }
 
-// MDOS operations (Combined: Emery.mdos.getMdos())
+// MDOS operations (treated as variable declarations)
 def mdosData = Emery.mdos.getMdosDisplayValuesClob(params)
 ```
 
+**Implementation Details:**
+- `Emery.dataTable.read()` calls are handled as regular method calls in declarations
+- Variable declarations with `def` are mapped to `BlockType.DECLARATION`
+- No special handling for Emery namespace - treated as standard Groovy syntax
+
 ### Scenario 24: Emery Test Operations
 
-**Covered:** Handles Emery test framework constructs.
+**Covered:** Emery test framework constructs handled as function calls and expressions.
 
 ```groovy
-// Test assertions (Combined: Emery.test.assertEquals())
+// Test assertions (treated as function calls)
 Emery.test.assertEquals("SUCCESS", result.status)
 Emery.test.assertTrue(userCount > 0)
 Emery.test.assertNotNull(response.data)
@@ -627,9 +647,14 @@ Emery.test.assertNotNull(response.data)
 // Test delays and timing
 Emery.test.delay(1000)
 Emery.test.waitFor { condition ->
-    return service.isReady()  // Condition closure → RECURSE
+    return service.isReady()  // Closure treated as pure statement
 }
 ```
+
+**Implementation Details:**
+- `Emery.test.*` calls are mapped to `BlockType.FUNCTION_CALL` or `BlockType.EXPRESSION`
+- Uses standard function call handling from tree-sitter grammar
+- No special test framework recognition - treated as regular method calls
 
 ### Scenario 25: Emery Workflow Operations
 
@@ -648,61 +673,19 @@ def workflowStep = Emery.workflow.defineStep("APPROVAL") { context ->
 
 ### Scenario 26: Use Statement Handling
 
-**Covered:** Handles Emery use declarations.
+**Covered:** Emery use declarations handled as function calls.
 
 ```groovy
-// Use declarations (Combined: use())
+// Use declarations (treated as function calls)
 use("EMERY_UTILITIES")
 use("EMERY_FORM_OPERATIONS")
 use("EMERY_DATA_ACCESS")
 ```
 
----
-
-## Performance Optimizations
-
-### Tree-sitter Query Usage
-
-The system uses compiled tree-sitter queries for efficient Groovy AST traversal:
-
-| Query Purpose | Target Nodes |
-|---------------|--------------|
-| Container Detection | `class_definition`, `method_definition`, `if_statement`, `for_loop`, `while_loop`, `try_statement` |
-| Closure Detection | `closure`, `closure_expression` |
-| Statement Extraction | All statement types within containers |
-| Control Flow Analysis | `if_statement`, `switch_statement`, `case` |
-| Method Call Detection | `function_call`, `juxt_function_call` |
-
-### Smart Detection Strategy
-
-For nested structure detection:
-- **Small nodes (<200 bytes):** Uses manual tree traversal (lower overhead)
-- **Larger nodes:** Uses compiled queries (faster for complex structures)
-- **Context-aware processing:** Different strategies for closures vs control flow
-
-```python
-def _should_recurse_into_node(self, node: Node) -> bool:
-    if node.type in self.GROOVY_LEAF_STATEMENTS:
-        return False
-    if node.type == 'closure' and self._is_structural_closure(node):
-        return False
-    return node.type in self.GROOVY_RECURSIVE_CONTAINERS
-```
-
-### Recursion Protection
-
-**Covered:** Multiple layers of recursion protection:
-
-```python
-# Depth limiting
-MAX_RECURSION_DEPTH = 50
-
-# Circular reference detection
-visited = set()
-
-# Python recursion limit increase
-sys.setrecursionlimit(5000)
-```
+**Implementation Details:**
+- `use()` statements are mapped to `BlockType.FUNCTION_CALL`
+- Treated as standard function calls with string parameters
+- No special DSL handling - uses regular tree-sitter parsing
 
 ---
 
@@ -726,18 +709,19 @@ BlockDiff (method: processData) - MODIFIED
 
 ### Key Data Structures
 
-- **`RecursiveNodeSignature`**: Signature for matching code blocks (type, identifier, hash, lines, children)
-- **`BlockDiff`**: Block-level difference with statement diffs
-- **`StatementDiff`**: Statement-level difference with optional child diffs
-- **`IfBranch`**: Individual if/else-if/else branch representation
-- **`ComparisonResult`**: Complete comparison result with statistics
+- **`RecursiveNodeSignature`**: Hierarchical signature for matching code blocks (type, identifier, content_hash, structure_hash, children, depth, path)
+- **`BlockSignature`**: Top-level block signature (type, identifier, content_hash, start_line, end_line, code, modifiers)
+- **`BlockDiff`**: Block-level difference with statement diffs and metadata
+- **`StatementDiff`**: Statement-level difference with optional child diffs and container support
+- **`ComparisonResult`**: Complete comparison result with statistics and error handling
 
-### Emery DSL Enhancements
+### Emery DSL Support
 
-- **Combined Statement Handling**: Method calls with closures treated as single units
-- **Typed Declaration Support**: Full capture of `USER_PROFILE_FORM obj = ...` patterns
-- **Enhanced Identifier Extraction**: Proper handling of `F.fieldName`, `Emery.module.method()`
-- **Binary Operation Support**: Special handling for `F.rows << newRow` patterns
+- **Typed Declaration Support**: Full capture of `USER_PROFILE_FORM obj = ...` patterns via `_extract_typed_declaration()`
+- **Standard Expression Handling**: `F.fieldName`, `Emery.module.method()` treated as regular expressions
+- **Binary Operation Support**: `F.rows << newRow` patterns mapped to `BlockType.EXPRESSION`
+- **Use Statement Recognition**: `use("MODULE_NAME")` handled as function calls
+- **No Special Combination Logic**: Emery constructs use standard Groovy parsing rules
 
 ---
 
@@ -747,19 +731,10 @@ BlockDiff (method: processData) - MODIFIED
 
 1. **Dynamic Groovy features** - Runtime-generated methods/properties
 2. **Cross-file analysis** - Each comparison is file-scoped
-3. **Semantic equivalence** - `a + b + c` vs `c + b + a` are treated as different
-4. **Rename detection** - Variable/method renames are detected as DELETED + ADDED
-5. **AST transformation** - @CompileStatic and other AST transformations
-6. **Gradle-specific syntax** - Build script DSL patterns (partially covered)
+3. **Rename detection** - Variable/method renames are detected as DELETED + ADDED
+4. **AST transformation** - @CompileStatic and other AST transformations
+5. **Gradle-specific syntax** - Build script DSL patterns (partially covered)
 
-### Known Node Type Limitations
-
-These patterns require special handling due to tree-sitter-groovy grammar limitations:
-
-- **Java-style enhanced for loops** - Converted to Groovy for-in syntax
-- **Array type casting** - `as String[]` syntax not supported
-- **Some closure contexts** - Distinction between structural and functional closures
-- **Dynamic method calls** - `obj."${methodName}"()` patterns
 
 ### Groovy-Specific Challenges
 
@@ -772,10 +747,10 @@ These patterns require special handling due to tree-sitter-groovy grammar limita
 
 ## API Usage
 
-### Block-Level Comparison
+### Direct API Usage
 
 ```python
-from groovy_ast_diff import GroovyASTDiff
+from app.domain.groovy_ast_diff import GroovyASTDiff
 
 # Initialize the comparison service
 service = GroovyASTDiff()
@@ -784,81 +759,97 @@ service = GroovyASTDiff()
 result = service.compare_files("file_a.groovy", "file_b.groovy")
 
 # Or compare from source
-result = service.compare_from_source(source_a, source_b)
+result = service.compare_sources(source_a.encode('utf-8'), source_b.encode('utf-8'))
 
 print(f"Similarity: {result.structural_similarity:.2%}")
-for diff in result.differences:
-    print(f"{diff.change_type}: {diff.identifier}")
+for diff in result.diffs:
+    print(f"{diff.change_type.value}: {diff.identifier}")
 ```
 
-### Recursive Comparison with Statement Analysis
+### Service Layer Usage
 
 ```python
-# The service automatically performs recursive analysis
+from app.services.groovy_comparison_service import GroovyComparisonService
+
+# Initialize the service
+service = GroovyComparisonService()
+
+# Compare files (automatically performs recursive analysis)
 result = service.compare_files("file_a.groovy", "file_b.groovy")
 
-for diff in result.differences:
-    print(f"{diff.change_type}: {diff.identifier}")
+for diff in result.diffs:
+    print(f"{diff.change_type.value}: {diff.identifier}")
     
-    # Statement-level diffs
+    # Statement-level diffs (hierarchical)
     for stmt_diff in diff.statement_diffs:
-        print(f"  {stmt_diff.change_type}: {stmt_diff.node_type}")
+        print(f"  {stmt_diff.change_type.value}: {stmt_diff.node_type}")
         
         # Child diffs for containers (recursive)
         for child in stmt_diff.child_diffs:
-            print(f"    {child.change_type}: {child.node_type}")
+            print(f"    {child.change_type.value}: {child.node_type}")
             
-            # Branch-level diffs for if statements
-            if hasattr(child, 'branch_label') and child.branch_label:
-                print(f"      Branch: {child.branch_label}")
+            # Container information
+            if stmt_diff.is_container:
+                print(f"      Container: {stmt_diff.description}")
 ```
 
-### Emery DSL Analysis
+### FastAPI Endpoint Usage
 
 ```python
-# Emery DSL patterns are automatically detected and handled
-result = service.compare_files("emery_before.groovy", "emery_after.groovy")
+# Via HTTP API endpoint
+import requests
 
-# Form field operations
-# F.fieldName access patterns
-# Emery.module.method() calls
-# Use statement handling
-# All automatically processed with proper identifier extraction
+files = {
+    'file_a': open('emery_before.groovy', 'rb'),
+    'file_b': open('emery_after.groovy', 'rb')
+}
+
+response = requests.post('http://localhost:8000/api/v1/compare', files=files)
+result = response.json()
+
+# Access comparison results
+print(f"Similarity: {result['summary']['structural_similarity']:.2%}")
+for diff in result['differences']:
+    print(f"{diff['change_type']}: {diff['identifier']}")
+    
+    # Statement-level changes
+    for stmt in diff['statement_diffs']:
+        print(f"  {stmt['change_type']}: {stmt['node_type']}")
 ```
 
 ---
 
 ## Version History
 
-- **Current Version**: Full recursive comparison with branch-aware if-else analysis
-- **Emery DSL Support**: Specialized handling for Emery language constructs
-- **Closure Method Combination**: Collection methods with closures as semantic units
-- **Typed Declaration Handling**: Full capture of typed variable declarations
-- **Enhanced Matching**: Hybrid similarity matching with multiple phases
+- **Current Version**: Full recursive comparison with hierarchical diff structure
+- **Multi-Phase Matching**: 4-phase matching strategy (identifier, content hash, similarity, unmatched)
 - **Context-Aware Closures**: Distinction between structural and functional closures
-- **Recursion Protection**: Multiple layers of infinite recursion prevention
+- **Recursion Protection**: Depth limiting and leaf node detection
+- **Emery DSL Support**: Standard handling of Emery constructs as regular Groovy syntax
+- **FastAPI Integration**: RESTful API with file upload and comparison endpoints
+- **Hierarchical Diffs**: Nested StatementDiff structure showing container relationships
 
 ---
 
-## Testing Coverage
 
-### Test Scenarios Covered
-
-| Category | Test Files | Scenarios |
-|----------|------------|-----------|
-| **Basic Groovy** | `class_*.groovy`, `function_*.groovy` | Class/method comparison |
-| **Control Flow** | `added_*.groovy`, `modified_*.groovy` | If/for/while/switch statements |
-| **Collections** | `expression_*.groovy` | Collection methods with closures |
-| **Emery Core** | `emery_form_*.groovy`, `emery_util_*.groovy` | Basic Emery constructs |
-| **Emery Extended** | `emery_advanced_*.groovy` | Complex Emery patterns |
-| **Edge Cases** | `moved_*.groovy`, `unchanged_*.groovy` | Movement and similarity detection |
 
 ### Validation Results
 
-- **100% Emery DSL Coverage**: All identified Emery constructs properly handled
-- **Branch-Aware Analysis**: If/else-if/else branches individually compared
-- **Closure Combination**: Collection methods with closures treated as semantic units
-- **Recursion Safety**: No infinite recursion in complex nested structures
-- **Performance**: Efficient handling of large Groovy files with deep nesting
+- **Comprehensive Groovy Support**: All major Groovy constructs (classes, methods, closures, control flow) properly handled
+- **Context-Aware Closure Handling**: Structural vs functional closures correctly distinguished
+- **Recursion Safety**: Depth limiting and leaf detection prevent infinite recursion
+- **Multi-Phase Matching**: Sophisticated matching strategy with 70% similarity threshold
+- **Emery DSL Compatibility**: Emery constructs handled as standard Groovy syntax
+- **API Integration**: Full FastAPI service with file upload and comparison endpoints
 
-This comprehensive coverage ensures accurate and reliable AST comparison for all Groovy and Emery DSL patterns encountered in real-world codebases.
+### Current Implementation Status
+
+**Fully Implemented:**
+- ✅ Block-level comparison with multi-phase matching
+- ✅ Recursive statement-level analysis
+- ✅ Context-aware closure handling
+- ✅ Hierarchical diff structure
+- ✅ Emery DSL support (as standard Groovy)
+- ✅ FastAPI service integration
+
+This implementation provides accurate and reliable AST comparison for Groovy codebases while maintaining compatibility with Emery DSL patterns.
