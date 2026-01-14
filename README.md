@@ -70,7 +70,8 @@ app/
 - Poetry (0.21.3)
 - Tree-sitter CLI (0.20.8)
 
-> **Note**: `tree-sitter-cli` is a native binary and cannot be installed via poetry dependencies. It must be installed separately as a system dependency. On windows, use WSL for installing tree-sitter-cli
+> **Note**: `tree-sitter-cli` is a native binary and cannot be installed via poetry dependencies. It must be installed separately as a system dependency. On windows, use WSL for installing tree-sitter-cli. Command : npm install -g tree-sitter-cli
+
 
 ### Setup
 
@@ -86,8 +87,11 @@ app/
 
 3. **Activate virtual environment**:
    ```bash
-   poetry env activate
-   source <path_from above command>
+    windows:
+      poetry env activate
+      source <path_from above command>
+    macos/linux:
+      poetry shell
    ```
 
 4. **Build the Tree-sitter Groovy parser**:
@@ -370,26 +374,6 @@ class GroovyComparisonService:
   ]
 }
 ```
-
-## Parser Limitations
-
-The Tree-sitter Groovy parser has some known limitations with certain Groovy syntax constructs:
-
-### Unsupported Syntax
-- **Type Casting with Arrays**: `as String[]` syntax is not supported
-  ```groovy
-  // ❌ This will cause parsing errors:
-  def array = ["A", "B", "C"] as String[]
-  
-  // ✅ Use this instead:
-  def array = ["A", "B", "C"]
-  ```
-
-### Workarounds
-When encountering parsing errors:
-1. Check for type casting syntax and remove unnecessary casts
-2. Simplify complex generic expressions if possible
-3. Use alternative Groovy syntax that achieves the same result
 
 ## Testing with Sample Files
 
