@@ -127,6 +127,7 @@ GROOVY_NODE_TYPE_TO_BLOCK_TYPE = {
     "method_call": BlockType.FUNCTION_CALL,         # obj.method() -> function_call
     "assignment": BlockType.EXPRESSION,             # value += number -> expression
     "binary_op": BlockType.EXPRESSION,              # list << item, a + b -> expression
+    "increment_op": BlockType.EXPRESSION,           # counter++ -> expression
     
     # Import/Package (using actual tree-sitter node names)
     "groovy_import": BlockType.IMPORT,

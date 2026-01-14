@@ -232,9 +232,11 @@ class GroovyASTDiff:
             
             # Handle println-style function calls: identifier followed by function_call
             # This fixes cases like: println add(5, 3) -> should be treated as single statement
+            # BUT only if they are on the same line to avoid interfering with malformed parsing workarounds
             if (child.type == 'identifier' and 
                 i + 1 < len(children) and 
-                children[i + 1].type == 'function_call'):
+                children[i + 1].type == 'function_call' and
+                child.end_point[0] == children[i + 1].start_point[0]):  # Same line check
                 
                 # Combine the identifier (println) and function_call (add(5, 3)) into a single statement
                 identifier_node = child
@@ -292,6 +294,79 @@ class GroovyASTDiff:
                 # Skip the next node (closure) since we processed it
                 i += 2
                 continue
+            
+            # Handle malformed juxt_function_call nodes that span multiple lines
+            # This fixes the grammar bug where "counter1++\nprintln" gets parsed as single juxt_function_call
+            if (child.type == 'juxt_function_call' and 
+                child.start_point[0] != child.end_point[0]):  # Multi-line juxt_function_call
+                
+                # Check if this looks like the malformed pattern
+                code = source[child.start_byte:child.end_byte].decode('utf-8', errors='replace')
+                if '++' in code and 'println' in code and '\n' in code:
+                    # This is likely the malformed pattern, split it into separate statements
+                    lines = code.split('\n')
+                    current_line = child.start_point[0]
+                    
+                    # Check if the next sibling is a string that belongs to println
+                    next_sibling = None
+                    if i + 1 < len(children) and children[i + 1].type == 'string':
+                        next_sibling = children[i + 1]
+                    
+                    for line in lines:
+                        line = line.strip()
+                        if line:  # Skip empty lines
+                            # Create individual signatures for each line
+                            if '++' in line:
+                                # This is an increment operation
+                                signature = RecursiveNodeSignature(
+                                    node_type="increment_op",
+                                    identifier=line.replace('++', '').strip(),
+                                    content_hash=self.recursive_parser._hash_content(line),
+                                    structure_hash=self.recursive_parser._hash_structure("increment_op", []),
+                                    body_hash=None,
+                                    start_line=current_line + 1,
+                                    end_line=current_line + 1,
+                                    depth=0,
+                                    parent_hash=None,
+                                    path="/increment_op",
+                                    children=[],
+                                    is_pure_statement=True,
+                                    is_container=False,
+                                    code=line,
+                                )
+                                signatures.append(signature)
+                            elif 'println' in line:
+                                # This is a println statement, check if we need to combine with next string
+                                println_code = line
+                                if next_sibling:
+                                    string_code = source[next_sibling.start_byte:next_sibling.end_byte].decode('utf-8', errors='replace')
+                                    println_code = f"{line} {string_code}"
+                                
+                                signature = RecursiveNodeSignature(
+                                    node_type="juxt_function_call",
+                                    identifier="println",
+                                    content_hash=self.recursive_parser._hash_content(println_code),
+                                    structure_hash=self.recursive_parser._hash_structure("juxt_function_call", []),
+                                    body_hash=None,
+                                    start_line=current_line + 1,
+                                    end_line=current_line + 1,
+                                    depth=0,
+                                    parent_hash=None,
+                                    path="/juxt_function_call",
+                                    children=[],
+                                    is_pure_statement=True,
+                                    is_container=False,
+                                    code=println_code,
+                                )
+                                signatures.append(signature)
+                        current_line += 1
+                    
+                    # Skip the next node if it was a string we combined
+                    if next_sibling:
+                        i += 2
+                    else:
+                        i += 1
+                    continue
             
             # Skip structural nodes that aren't meaningful blocks
             if child.type in {'identifier', 'type', 'parameters', 'formal_parameters'}:
