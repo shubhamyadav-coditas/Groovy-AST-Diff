@@ -612,6 +612,33 @@ class GroovyASTDiff:
         
         return modifiers
     
+    def _extract_if_condition(self, if_node, source: bytes) -> str:
+        """
+        Extract the condition from an if_statement node for semantic matching.
+        Returns the condition code as a string, or empty string if not found.
+        """
+        if if_node.type != "if_statement":
+            return ""
+        
+        condition_node = if_node.child_by_field_name("condition")
+        if condition_node:
+            return source[condition_node.start_byte:condition_node.end_byte].decode('utf-8', errors='replace').strip()
+        return ""
+    
+    def _extract_assignment_identifier(self, assignment_node, source: bytes) -> str:
+        """
+        Extract the left-hand side identifier from an assignment node for semantic matching.
+        Returns the identifier as a string, or empty string if not found.
+        """
+        if assignment_node.type != "assignment":
+            return ""
+        
+        # Look for the left-hand side (target) of the assignment
+        for child in assignment_node.children:
+            if child.type in ["identifier", "dotted_identifier"]:
+                return source[child.start_byte:child.end_byte].decode('utf-8', errors='replace').strip()
+        return ""
+    
     def _compare_blocks(
         self, 
         blocks_a: List[BlockSignature], 
@@ -748,7 +775,8 @@ class GroovyASTDiff:
                     similarity = calculate_similarity(block_a.code, block_b.code)
                     
                     # Use higher threshold for comments (70%) as they need stronger similarity
-                    threshold = 0.7 if block_a.block_type == BlockType.COMMENT else 0.3
+                    # Increased general threshold from 30% to 60% to prevent incorrect matches
+                    threshold = 0.7 if block_a.block_type == BlockType.COMMENT else 0.6
                     
                     # High confidence threshold - if similarity is very high, match immediately
                     high_confidence_threshold = 0.9
@@ -769,7 +797,7 @@ class GroovyASTDiff:
                     block_a.block_type == block_b.block_type):
                     
                     similarity = calculate_similarity(block_a.code, block_b.code)
-                    threshold = 0.7 if block_a.block_type == BlockType.COMMENT else 0.3
+                    threshold = 0.7 if block_a.block_type == BlockType.COMMENT else 0.6
                     
                     if similarity >= threshold:
                         similarity_candidates.append((similarity, i, j, block_a, block_b))
@@ -1443,8 +1471,53 @@ class GroovyASTDiff:
                     branch_a["condition"] == branch_b["condition"]):
                     
                     # Same condition - compare body statements
-                    body_diffs = self._compare_statement_lists_generic(
-                        branch_a["statements"], branch_b["statements"], source_a, source_b
+                    # Convert raw nodes to StatementSignature objects first
+                    sigs_a = []
+                    for k, stmt in enumerate(branch_a["statements"]):
+                        code = source_a[stmt.start_byte:stmt.end_byte].decode('utf-8', errors='replace')
+                        identifier = self._extract_statement_identifier(stmt, source_a) or self._extract_identifier(stmt, source_a) or f"anonymous_{stmt.type}"
+                        sigs_a.append(StatementSignature(
+                            content_hash=hash_content(code),
+                            code=code.strip(),
+                            start_line=stmt.start_point[0] + 1,
+                            end_line=stmt.end_point[0] + 1,
+                            index=k,
+                            node_type=stmt.type,
+                            identifier=identifier
+                        ))
+                    
+                    sigs_b = []
+                    for k, stmt in enumerate(branch_b["statements"]):
+                        code = source_b[stmt.start_byte:stmt.end_byte].decode('utf-8', errors='replace')
+                        identifier = self._extract_statement_identifier(stmt, source_b) or self._extract_identifier(stmt, source_b) or f"anonymous_{stmt.type}"
+                        sigs_b.append(StatementSignature(
+                            content_hash=hash_content(code),
+                            code=code.strip(),
+                            start_line=stmt.start_point[0] + 1,
+                            end_line=stmt.end_point[0] + 1,
+                            index=k,
+                            node_type=stmt.type,
+                            identifier=identifier
+                        ))
+                    
+                    # Get the container nodes (if body, else body, etc.)
+                    container_node_a = None
+                    container_node_b = None
+                    if branch_a["branch_type"] == "if":
+                        container_node_a = node_a.child_by_field_name("body")
+                        container_node_b = node_b.child_by_field_name("body")
+                    elif branch_a["branch_type"] == "else_if":
+                        # For else_if, we need to find the right else_if node
+                        # This is more complex, but for now use the main node
+                        container_node_a = node_a
+                        container_node_b = node_b
+                    elif branch_a["branch_type"] == "else":
+                        container_node_a = node_a.child_by_field_name("else_body")
+                        container_node_b = node_b.child_by_field_name("else_body")
+                    
+                    # Use proper statement comparison with container nodes
+                    body_diffs = self._compare_statement_lists(
+                        sigs_a, sigs_b, container_node_a, container_node_b, source_a, source_b
                     )
                     
                     if not body_diffs:
@@ -1482,8 +1555,42 @@ class GroovyASTDiff:
                       branch_b["branch_type"] == "else"):
                     
                     # Compare else body statements
-                    body_diffs = self._compare_statement_lists_generic(
-                        branch_a["statements"], branch_b["statements"], source_a, source_b
+                    # Convert raw nodes to StatementSignature objects first
+                    sigs_a = []
+                    for k, stmt in enumerate(branch_a["statements"]):
+                        code = source_a[stmt.start_byte:stmt.end_byte].decode('utf-8', errors='replace')
+                        identifier = self._extract_statement_identifier(stmt, source_a) or self._extract_identifier(stmt, source_a) or f"anonymous_{stmt.type}"
+                        sigs_a.append(StatementSignature(
+                            content_hash=hash_content(code),
+                            code=code.strip(),
+                            start_line=stmt.start_point[0] + 1,
+                            end_line=stmt.end_point[0] + 1,
+                            index=k,
+                            node_type=stmt.type,
+                            identifier=identifier
+                        ))
+                    
+                    sigs_b = []
+                    for k, stmt in enumerate(branch_b["statements"]):
+                        code = source_b[stmt.start_byte:stmt.end_byte].decode('utf-8', errors='replace')
+                        identifier = self._extract_statement_identifier(stmt, source_b) or self._extract_identifier(stmt, source_b) or f"anonymous_{stmt.type}"
+                        sigs_b.append(StatementSignature(
+                            content_hash=hash_content(code),
+                            code=code.strip(),
+                            start_line=stmt.start_point[0] + 1,
+                            end_line=stmt.end_point[0] + 1,
+                            index=k,
+                            node_type=stmt.type,
+                            identifier=identifier
+                        ))
+                    
+                    # Get the container nodes for else branches
+                    container_node_a = node_a.child_by_field_name("else_body")
+                    container_node_b = node_b.child_by_field_name("else_body")
+                    
+                    # Use proper statement comparison with container nodes
+                    body_diffs = self._compare_statement_lists(
+                        sigs_a, sigs_b, container_node_a, container_node_b, source_a, source_b
                     )
                     
                     if not body_diffs:
@@ -1632,9 +1739,53 @@ class GroovyASTDiff:
                 # Match by branch type
                 if branch_a["branch_type"] == branch_b["branch_type"]:
                     
-                    # Compare body statements
-                    body_diffs = self._compare_statement_lists_generic(
-                        branch_a["statements"], branch_b["statements"], source_a, source_b
+                    # Compare body statements - convert raw nodes to StatementSignature objects first
+                    # Convert branch_a statements to StatementSignature objects
+                    sigs_a = []
+                    for i, stmt in enumerate(branch_a["statements"]):
+                        code = source_a[stmt.start_byte:stmt.end_byte].decode('utf-8', errors='replace')
+                        identifier = self._extract_statement_identifier(stmt, source_a) or self._extract_identifier(stmt, source_a) or f"anonymous_{stmt.type}"
+                        sigs_a.append(StatementSignature(
+                            content_hash=hash_content(code),
+                            code=code.strip(),
+                            start_line=stmt.start_point[0] + 1,
+                            end_line=stmt.end_point[0] + 1,
+                            index=i,
+                            node_type=stmt.type,
+                            identifier=identifier
+                        ))
+                    
+                    # Convert branch_b statements to StatementSignature objects
+                    sigs_b = []
+                    for i, stmt in enumerate(branch_b["statements"]):
+                        code = source_b[stmt.start_byte:stmt.end_byte].decode('utf-8', errors='replace')
+                        identifier = self._extract_statement_identifier(stmt, source_b) or self._extract_identifier(stmt, source_b) or f"anonymous_{stmt.type}"
+                        sigs_b.append(StatementSignature(
+                            content_hash=hash_content(code),
+                            code=code.strip(),
+                            start_line=stmt.start_point[0] + 1,
+                            end_line=stmt.end_point[0] + 1,
+                            index=i,
+                            node_type=stmt.type,
+                            identifier=identifier
+                        ))
+                    
+                    # Get the container nodes (try_body, catch_body, etc.)
+                    container_node_a = None
+                    container_node_b = None
+                    if branch_a["branch_type"] == "try":
+                        container_node_a = node_a.child_by_field_name("body")
+                        container_node_b = node_b.child_by_field_name("body")
+                    elif branch_a["branch_type"] == "catch":
+                        container_node_a = node_a.child_by_field_name("catch_body")
+                        container_node_b = node_b.child_by_field_name("catch_body")
+                    elif branch_a["branch_type"] == "finally":
+                        container_node_a = node_a.child_by_field_name("finally_body")
+                        container_node_b = node_b.child_by_field_name("finally_body")
+                    
+                    # Now use the proper statement comparison with container nodes
+                    body_diffs = self._compare_statement_lists(
+                        sigs_a, sigs_b, container_node_a, container_node_b, source_a, source_b
                     )
                     
                     if not body_diffs:
@@ -2648,7 +2799,47 @@ class GroovyASTDiff:
                                     stmt_b.node_type in {'builtintype', 'parameter_list'} and
                                     stmt_a.node_type == stmt_b.node_type)
                     
-                    if identifier_match or semantic_match:
+                    # Semantic validation for IF statements - must have same or very similar condition
+                    if_condition_match = False
+                    if stmt_a.node_type == "if_statement" and stmt_b.node_type == "if_statement":
+                        if container_node_a and container_node_b and source_a and source_b:
+                            node_a = self._find_node_at_line(container_node_a, stmt_a.start_line)
+                            node_b = self._find_node_at_line(container_node_b, stmt_b.start_line)
+                            if node_a and node_b:
+                                condition_a = self._extract_if_condition(node_a, source_a)
+                                condition_b = self._extract_if_condition(node_b, source_b)
+                                
+                                if condition_a and condition_b:
+                                    # Exact match or high similarity (90%+) for conditions
+                                    if condition_a == condition_b:
+                                        if_condition_match = True
+                                    else:
+                                        condition_similarity = calculate_similarity(condition_a, condition_b)
+                                        if_condition_match = condition_similarity >= 0.9
+                    
+                    # Semantic validation for assignments - must have same left-hand side identifier
+                    assignment_match = False
+                    if stmt_a.node_type == "assignment" and stmt_b.node_type == "assignment":
+                        if container_node_a and container_node_b and source_a and source_b:
+                            node_a = self._find_node_at_line(container_node_a, stmt_a.start_line)
+                            node_b = self._find_node_at_line(container_node_b, stmt_b.start_line)
+                            if node_a and node_b:
+                                identifier_a = self._extract_assignment_identifier(node_a, source_a)
+                                identifier_b = self._extract_assignment_identifier(node_b, source_b)
+                                # Only match if identifiers are the same and not empty
+                                assignment_match = (identifier_a == identifier_b and identifier_a != "")
+                    
+                    # For IF statements and assignments, require semantic validation
+                    # For other types, allow identifier or semantic match
+                    should_match = False
+                    if stmt_a.node_type == "if_statement" and stmt_b.node_type == "if_statement":
+                        should_match = if_condition_match  # Require condition match for IF statements
+                    elif stmt_a.node_type == "assignment" and stmt_b.node_type == "assignment":
+                        should_match = assignment_match  # Require identifier match for assignments
+                    else:
+                        should_match = identifier_match or semantic_match  # Normal logic for other types
+                    
+                    if should_match:
                         
                         similarity = calculate_similarity(stmt_a.code, stmt_b.code)
                         
@@ -2734,9 +2925,44 @@ class GroovyASTDiff:
                 if self._are_statements_potentially_similar(stmt_a, stmt_b):
                     similarity = calculate_similarity(stmt_a.code, stmt_b.code)
                     if similarity > best_similarity and similarity >= 0.5:  # 50% threshold as requested
-                        best_similarity = similarity
-                        best_match = stmt_b
-                        best_j = j
+                        
+                        # Semantic validation for IF statements - must have same or very similar condition
+                        if_condition_match = True  # Default to allow match
+                        if stmt_a.node_type == "if_statement" and stmt_b.node_type == "if_statement":
+                            if_condition_match = False  # Require validation for IF statements
+                            if container_node_a and container_node_b and source_a and source_b:
+                                node_a = self._find_node_at_line(container_node_a, stmt_a.start_line)
+                                node_b = self._find_node_at_line(container_node_b, stmt_b.start_line)
+                                if node_a and node_b:
+                                    condition_a = self._extract_if_condition(node_a, source_a)
+                                    condition_b = self._extract_if_condition(node_b, source_b)
+                                    
+                                    if condition_a and condition_b:
+                                        # Exact match or high similarity (90%+) for conditions
+                                        if condition_a == condition_b:
+                                            if_condition_match = True
+                                        else:
+                                            condition_similarity = calculate_similarity(condition_a, condition_b)
+                                            if_condition_match = condition_similarity >= 0.9
+                        
+                        # Semantic validation for assignments - must have same left-hand side identifier
+                        assignment_match = True  # Default to allow match
+                        if stmt_a.node_type == "assignment" and stmt_b.node_type == "assignment":
+                            assignment_match = False  # Require validation for assignments
+                            if container_node_a and container_node_b and source_a and source_b:
+                                node_a = self._find_node_at_line(container_node_a, stmt_a.start_line)
+                                node_b = self._find_node_at_line(container_node_b, stmt_b.start_line)
+                                if node_a and node_b:
+                                    identifier_a = self._extract_assignment_identifier(node_a, source_a)
+                                    identifier_b = self._extract_assignment_identifier(node_b, source_b)
+                                    # Only match if identifiers are the same and not empty
+                                    assignment_match = (identifier_a == identifier_b and identifier_a != "")
+                        
+                        # Only proceed if semantic validation passes
+                        if if_condition_match and assignment_match:
+                            best_similarity = similarity
+                            best_match = stmt_b
+                            best_j = j
             
             if best_match:
                 # Determine if it's moved and modified or just modified

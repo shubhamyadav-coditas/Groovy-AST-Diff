@@ -48,6 +48,16 @@ module.exports = grammar({
     // 👇 ADD THESE
     [$.constructor_definition, $.function_definition],
     [$.constructor_definition, $.function_declaration],
+    [$.declaration],
+    [$.closure_parameter, $._juxtable_expression],
+    [$.closure_parameter, $.variable_declarator],
+    [$.map_item, $.juxt_function_call],
+    [$.map_item, $.ternary_op],
+    [$._juxt_argument_list, $.map_item],
+    [$.declaration, $.function_declaration, $.function_definition, $._type],
+    [$.closure_parameter, $.declaration, $.function_declaration, $.function_definition, $._type],
+    [$.juxt_function_call, $.map],
+    [$.dotted_identifier, $._expression],
   ],
 
   rules: {
@@ -117,7 +127,7 @@ module.exports = grammar({
 
     dotted_identifier: $ =>
       prec.left(1, seq(
-        choice($._primary_expression, $._type_identifier, $.closure),
+        choice($._primary_expression, $._type_identifier, $.closure, $.juxt_function_call),
         repeat1(seq(
         '.',
         choice(
@@ -194,9 +204,7 @@ module.exports = grammar({
           [">=", PREC.COMPARE],
           ["in", PREC.COMPARE],
           ["!in", PREC.COMPARE],
-          ["instanceof", PREC.COMPARE],
           ["!instanceof", PREC.COMPARE],
-          ["as", PREC.COMPARE],
           ["==", PREC.COMPARE_EQ],
           ["!=", PREC.COMPARE_EQ],
           ["<=>", PREC.COMPARE_EQ],
@@ -279,57 +287,34 @@ module.exports = grammar({
 
     closure: $ => seq(
       '{',
-      optional(choice('->', seq(alias($._param_list, $.parameter_list), '->'))),
-      // repeat(choice($._statement, $._expression)),
+      optional($.closure_parameters_with_arrow),
       repeat($._statement),
       optional($._expression),
       '}'
     ),
 
-    comment: $ => token(choice(
-      /\/\/[^\n]*/,
-      // Block comment pattern with explicit matching
-      /\/\*([^*]|\*[^\/])*\*\//
+    closure_parameters_with_arrow: $ => prec(3, seq(
+      choice(
+        $.closure_parameter,
+        seq($.closure_parameter, repeat(seq(',', $.closure_parameter)))
+      ),
+      '->'
     )),
 
-    groovy_doc: $ =>
-      // JavaDoc pattern - only match /** comments that contain @ tags (actual JavaDoc)
-      seq(
-        '/**',
-        repeat(choice(
-          /\s+/,
-          /\*+/,
-          /[^@*\s]+/,
-        )),
-        repeat1(choice(
-          $.groovy_doc_param,
-          $.groovy_doc_throws,
-          $.groovy_doc_tag,
-          $.groovy_doc_at_text,
-        )),
-        repeat(choice(
-          /\s+/,
-          /\*+/,
-          /[^*]+/,
-        )),
-        '*/'
-      ),
-
-    groovy_doc_param: $ => seq (
-      '@param',
-      $.identifier
+    closure_parameter: $ => seq(
+      optional(field('type', choice($._type, 'def'))),
+      field('name', $.identifier),
+      optional(seq('=', field('value', $._expression))),
     ),
 
-    groovy_doc_throws: $ => seq (
-      '@throws',
-      $.identifier
-    ),
+    comment: $ => token(choice(
+      /\/\/[^\n]*/,
+      // Regular block comment
+      /\/\*([^*]|\*+[^*\/])*\*+\//,
+      // JavaDoc comment (/** ... */)
+      /\/\*\*([^*]|\*+[^*\/])*\*+\//
+    )),
 
-    groovy_doc_tag: $ =>
-      /@[a-z]+/,
-
-    groovy_doc_at_text: $ =>
-      /@[^@\s*]*/,
 
     declaration: $ => seq(
       repeat($.annotation),
@@ -341,8 +326,7 @@ module.exports = grammar({
             '_',
             seq(
               choice(field('type', $._type), 'def'),
-              field('name', $.identifier),
-              optional(seq('=', field('value', $._expression)))
+              list_of($.variable_declarator)
             ),
           )
         ),
@@ -352,12 +336,16 @@ module.exports = grammar({
             '_',
             seq(
               optional(choice(field('type', $._type), 'def')),
-              field('name', $.identifier),
-              optional(seq('=', field('value', $._expression)))
+              list_of($.variable_declarator)
             ),
           )
         ),
       ),
+    ),
+
+    variable_declarator: $ => seq(
+      field('name', $.identifier),
+      optional(seq('=', field('value', $._expression)))
     ),
 
     parenthesized_expression: ($) =>
@@ -375,7 +363,22 @@ module.exports = grammar({
       $.unary_op,
       $.access_op,
       $.closure,
+      $.cast_expression,
+      $.instanceof_expression,
+      $.juxt_function_call,
       alias("null", $.null),
+    )),
+
+    cast_expression: $ => prec.left(PREC.COMPARE, seq(
+      $._expression,
+      "as",
+      $._type
+    )),
+
+    instanceof_expression: $ => prec.left(PREC.COMPARE, seq(
+      $._expression,
+      "instanceof",
+      $._type
     )),
 
     _primary_expression: $ => prec.left(1, choice(
@@ -393,12 +396,14 @@ module.exports = grammar({
       $.parenthesized_expression,
       $._juxtable_expression,
       $._type_identifier,
+      $.type_with_generics,
     ),
 
     _juxtable_expression: $ => choice(
       $.dotted_identifier,
       $.identifier,
       $.index,
+      $.builtintype,
     ),
 
     do_while_loop: $ => seq(
@@ -569,7 +574,7 @@ module.exports = grammar({
         $.map,
         "this",
         $.function_call,
-        $.dotted_identifier,
+        // Removed $.dotted_identifier to prevent incorrect parsing of method chains
         $.identifier,
         $.index,
       )
@@ -819,6 +824,7 @@ module.exports = grammar({
       $.array_type, //TODO: int[5]?
       $.type_with_generics,
       $._type_identifier,
+      'def',
     )),
 
     array_type: $ => seq($._type, '[]'),
@@ -838,7 +844,10 @@ module.exports = grammar({
     //TODO diamond operator
     type_with_generics: $ => seq($._type, $.generics),
 
-    generics: $ => seq('<', list_of($._type), '>'),
+    generics: $ => choice(
+      seq('<', list_of($._type), '>'),
+      seq('<', '>'), // Diamond operator
+    ),
 
     unary_op: $ =>
       choice(
