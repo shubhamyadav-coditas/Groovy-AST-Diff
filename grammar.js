@@ -573,7 +573,7 @@ module.exports = grammar({
         $.list,
         $.map,
         "this",
-        $.function_call,
+        // Removed $.function_call to prevent incorrect parsing of separate statements as juxtaposition
         // Removed $.dotted_identifier to prevent incorrect parsing of method chains
         $.identifier,
         $.index,

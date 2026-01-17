@@ -874,6 +874,15 @@ class GroovyRecursiveParser:
         if name_node:
             return source[name_node.start_byte:name_node.end_byte].decode('utf-8', errors='replace')
         
+        # Handle closure declarations like: def buildComplexMdosQuery = { ... }
+        # Structure: declaration -> variable_declarator -> identifier (name field)
+        if node.type == "declaration":
+            for child in node.named_children:
+                if child.type == "variable_declarator":
+                    name_node = child.child_by_field_name("name")
+                    if name_node and name_node.type == "identifier":
+                        return source[name_node.start_byte:name_node.end_byte].decode('utf-8', errors='replace')
+        
         # Look for identifier children
         for child in node.named_children:
             if child.type == "identifier":

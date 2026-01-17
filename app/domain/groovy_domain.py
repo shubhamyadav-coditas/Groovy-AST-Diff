@@ -203,9 +203,24 @@ def calculate_similarity(text1: str, text2: str) -> float:
 
 def normalize_code(code: str) -> str:
     """
-    Normalize code for comparison by removing extra whitespace.
+    Normalize code for comparison by removing extra whitespace and standardizing formatting.
     """
-    return " ".join(code.split())
+    import re
+    
+    # First, join all whitespace into single spaces
+    normalized = " ".join(code.split())
+    
+    # Remove spaces around common punctuation to handle formatting differences
+    # Remove spaces before/after: ( ) [ ] { } , ; . 
+    normalized = re.sub(r'\s*([()[\]{},;.])\s*', r'\1', normalized)
+    
+    # Add back necessary spaces after commas and semicolons for readability
+    normalized = re.sub(r'([,;])', r'\1 ', normalized)
+    
+    # Remove any double spaces that might have been created
+    normalized = re.sub(r'\s+', ' ', normalized)
+    
+    return normalized.strip()
 
 
 def hash_content(content: str) -> str:

@@ -561,6 +561,15 @@ class GroovyASTDiff:
                     # If no next identifier found, this might be the function name after all
                     return identifier_text
         
+        elif node.type == "declaration":
+            # Handle closure declarations like: def buildComplexMdosQuery = { ... }
+            # Structure: declaration -> variable_declarator -> identifier (name field)
+            for child in node.named_children:
+                if child.type == "variable_declarator":
+                    name_node = child.child_by_field_name("name")
+                    if name_node and name_node.type == "identifier":
+                        return source[name_node.start_byte:name_node.end_byte].decode('utf-8', errors='replace')
+        
         elif node.type in GROOVY_CLASS_TYPES:
             # Look for identifier as direct child
             for child in node.named_children:
@@ -1742,7 +1751,7 @@ class GroovyASTDiff:
                     # Compare body statements - convert raw nodes to StatementSignature objects first
                     # Convert branch_a statements to StatementSignature objects
                     sigs_a = []
-                    for i, stmt in enumerate(branch_a["statements"]):
+                    for stmt_idx, stmt in enumerate(branch_a["statements"]):
                         code = source_a[stmt.start_byte:stmt.end_byte].decode('utf-8', errors='replace')
                         identifier = self._extract_statement_identifier(stmt, source_a) or self._extract_identifier(stmt, source_a) or f"anonymous_{stmt.type}"
                         sigs_a.append(StatementSignature(
@@ -1750,14 +1759,14 @@ class GroovyASTDiff:
                             code=code.strip(),
                             start_line=stmt.start_point[0] + 1,
                             end_line=stmt.end_point[0] + 1,
-                            index=i,
+                            index=stmt_idx,
                             node_type=stmt.type,
                             identifier=identifier
                         ))
                     
                     # Convert branch_b statements to StatementSignature objects
                     sigs_b = []
-                    for i, stmt in enumerate(branch_b["statements"]):
+                    for stmt_idx, stmt in enumerate(branch_b["statements"]):
                         code = source_b[stmt.start_byte:stmt.end_byte].decode('utf-8', errors='replace')
                         identifier = self._extract_statement_identifier(stmt, source_b) or self._extract_identifier(stmt, source_b) or f"anonymous_{stmt.type}"
                         sigs_b.append(StatementSignature(
@@ -1765,7 +1774,7 @@ class GroovyASTDiff:
                             code=code.strip(),
                             start_line=stmt.start_point[0] + 1,
                             end_line=stmt.end_point[0] + 1,
-                            index=i,
+                            index=stmt_idx,
                             node_type=stmt.type,
                             identifier=identifier
                         ))
@@ -2637,7 +2646,15 @@ class GroovyASTDiff:
     
     def _extract_statement_identifier(self, node: Node, source: bytes) -> Optional[str]:
         """Extract identifier from a statement node."""
-        if node.type == "return_statement":
+        if node.type == "declaration":
+            # Handle closure declarations like: def buildComplexMdosQuery = { ... }
+            # Structure: declaration -> variable_declarator -> identifier (name field)
+            for child in node.named_children:
+                if child.type == "variable_declarator":
+                    name_node = child.child_by_field_name("name")
+                    if name_node and name_node.type == "identifier":
+                        return source[name_node.start_byte:name_node.end_byte].decode('utf-8', errors='replace')
+        elif node.type == "return_statement":
             return "return"
         elif node.type in {"comment", "line_comment", "block_comment"}:
             # Use first few words of comment as identifier
@@ -2879,6 +2896,9 @@ class GroovyASTDiff:
                                     # Special handling for if_statement nodes - use branch-aware analysis
                                     if node_a.type == "if_statement" and node_b.type == "if_statement":
                                         diff.child_diffs = self._compare_if_statement_branches(node_a, node_b, source_a, source_b)
+                                    # Special handling for try_statement nodes - use branch-aware analysis
+                                    elif node_a.type == "try_statement" and node_b.type == "try_statement":
+                                        diff.child_diffs = self._compare_try_statement_branches(node_a, node_b, source_a, source_b)
                                     # Special handling for switch_statement nodes - extract individual case statements
                                     elif node_a.type == "switch_statement" and node_b.type == "switch_statement":
                                         diff.child_diffs = self._compare_switch_statement_cases(node_a, node_b, source_a, source_b)
