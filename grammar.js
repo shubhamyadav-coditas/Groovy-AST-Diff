@@ -552,9 +552,17 @@ module.exports = grammar({
       ']',
     )),
 
-    juxt_function_call: $ => seq(
-      field('function', $._juxtable_expression),
-      field('args', alias($._juxt_argument_list, $.argument_list)),
+    juxt_function_call: $ => choice(
+      // Standard juxtaposition call
+      seq(
+        field('function', $._juxtable_expression),
+        field('args', alias($._juxt_argument_list, $.argument_list)),
+      ),
+      // Method call with closure (like F.orb.rows.each { ... })
+      prec(3, seq(
+        field('function', $._juxtable_expression),
+        field('args', $.closure),
+      )),
     ),
 
     _juxt_argument_list: $ => {
