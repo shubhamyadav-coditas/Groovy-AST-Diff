@@ -184,4 +184,5 @@ async def compare_files(
         file_b=file_b_info,
         summary=summary,
         differences=differences,
+        warnings=comparison_result.warnings,
     )

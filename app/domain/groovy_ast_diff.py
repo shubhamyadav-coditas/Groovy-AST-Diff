@@ -166,12 +166,16 @@ class GroovyASTDiff:
                     return True
                 return any(has_actual_errors(child) for child in node.children)
             
+            # Check for parsing errors but continue comparison
+            parsing_warnings = None
             if has_actual_errors(tree_a.root_node) or has_actual_errors(tree_b.root_node):
                 error_details = self._get_detailed_parsing_errors(
                     tree_a, tree_b, source_a, source_b, file_a_path, file_b_path
                 )
-                if error_details:  # Only return error if actual errors were found
-                    return self._error_result(f"One or both sources have syntax errors: {error_details}")
+                if error_details:
+                    parsing_warnings = f"One or both sources have syntax errors: {error_details}"
+                    print(f"Warning: {parsing_warnings}")
+                    print("Continuing comparison despite parsing errors...")
             
             print("Extracting hierarchical signatures using recursive parser...")
             # Extract hierarchical signatures using recursive parser
@@ -182,7 +186,13 @@ class GroovyASTDiff:
             
             # Compare using recursive approach
             print("Comparing using recursive approach...")
-            return self._compare_recursive_signatures(signatures_a, signatures_b, source_a, source_b, file_a_path, file_b_path)
+            result = self._compare_recursive_signatures(signatures_a, signatures_b, source_a, source_b, file_a_path, file_b_path)
+            
+            # Add parsing warnings to the result if any
+            if parsing_warnings:
+                result.warnings = parsing_warnings
+            
+            return result
             
         except Exception as e:
             import traceback

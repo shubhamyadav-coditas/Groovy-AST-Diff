@@ -129,6 +129,8 @@ class ComparisonResult:
     diffs: List[BlockDiff]
     # Error info
     error: Optional[str] = None
+    # Warning info (non-blocking issues like parsing errors)
+    warnings: Optional[str] = None
     # Additional metadata
     file_a_path: str = ""
     file_b_path: str = ""

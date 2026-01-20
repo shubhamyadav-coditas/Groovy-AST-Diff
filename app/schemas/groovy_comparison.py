@@ -63,6 +63,7 @@ class CompareFilesResponse(BaseModel):
     file_b: "FileInfoSimple"
     summary: ComparisonSummary
     differences: List[BlockDiffSchema]
+    warnings: Optional[str] = None
 
 
 # Import here to avoid circular imports
