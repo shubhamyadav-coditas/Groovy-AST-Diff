@@ -344,7 +344,7 @@ module.exports = grammar({
     ),
 
     variable_declarator: $ => seq(
-      field('name', $.identifier),
+      field('name', choice($.identifier, $._type_identifier)),
       optional(seq('=', field('value', $._expression)))
     ),
 
@@ -581,7 +581,8 @@ module.exports = grammar({
         $.list,
         $.map,
         "this",
-        // Removed $.function_call to prevent incorrect parsing of separate statements as juxtaposition
+        // Re-added function_call with very low precedence to support LeapYear1 case while minimizing conflicts
+        prec(-2, $.function_call),
         // Removed $.dotted_identifier to prevent incorrect parsing of method chains
         $.identifier,
         $.index,

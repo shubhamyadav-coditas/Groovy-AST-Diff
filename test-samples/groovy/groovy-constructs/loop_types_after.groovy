@@ -30,7 +30,7 @@ def x = 0
 do {
     println "Do-while loop: $x"
     x++
-} while (x < 3)
+} while (x < 4)
 
 
 /* --------------------FOR EACH LOOP BLOCK 5-------------------- */
