@@ -38,7 +38,6 @@ class BlockDiffSchema(BaseModel):
     similarity_score: float = 0.0
     statement_diffs: List[StatementDiffSchema] = []
     description: str = ""
-    modifiers: List[str] = []
 
 
 class ComparisonSummary(BaseModel):

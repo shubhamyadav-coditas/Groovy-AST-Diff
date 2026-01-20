@@ -27,7 +27,6 @@ class BlockSignature:
     code: str                          # The actual source code
     node_type: str                     # tree-sitter node type
     children_count: int = 0            # Number of child nodes
-    modifiers: List[str] = field(default_factory=list)  # static, private, etc.
 
     def __hash__(self) -> int:
         """Hash based on type and identifier for set operations."""
@@ -148,7 +147,6 @@ class GroovyASTNode:
     children: List['GroovyASTNode']
     # Enhanced properties
     identifier: Optional[str] = None   # Name if this is a named entity
-    modifiers: List[str] = field(default_factory=list)  # static, private, etc.
     content_hash: str = ""             # Hash of the content
     is_container: bool = False         # Whether this node contains other blocks
     

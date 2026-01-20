@@ -149,7 +149,6 @@ async def compare_files(
                 if sd.change_type != StatementChangeType.UNCHANGED
             ],
             description=diff.description,
-            modifiers=diff.modifiers,
         )
         for diff in comparison_result.diffs
         if diff.change_type != ChangeType.UNCHANGED

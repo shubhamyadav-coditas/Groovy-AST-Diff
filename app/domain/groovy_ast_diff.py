@@ -427,7 +427,6 @@ class GroovyASTDiff:
                 code=sig.code,
                 node_type=sig.node_type,
                 children_count=len(sig.children),
-                modifiers=[]  # TODO: Extract modifiers from recursive signature
             )
             
             block_signatures.append(block_sig)
@@ -507,8 +506,6 @@ class GroovyASTDiff:
             # Extract identifier
             identifier = self._extract_identifier(node, source) or hash_content(code)
             
-            # Extract modifiers
-            modifiers = self._extract_modifiers(node, source)
             
             # Calculate content hash
             content_hash = hash_content(code)
@@ -525,7 +522,6 @@ class GroovyASTDiff:
                 code=code,
                 node_type=node.type,
                 children_count=children_count,
-                modifiers=modifiers
             )
             
         except Exception as e:
@@ -609,17 +605,6 @@ class GroovyASTDiff:
         
         return None
     
-    def _extract_modifiers(self, node: Node, source: bytes) -> List[str]:
-        """Extract modifiers (static, private, etc.) from a node."""
-        modifiers = []
-        
-        # Look for modifier nodes in the tree
-        for child in node.children:
-            if child.type in {'public', 'private', 'protected', 'static', 'final', 'abstract'}:
-                modifier = source[child.start_byte:child.end_byte].decode('utf-8', errors='replace')
-                modifiers.append(modifier)
-        
-        return modifiers
     
     def _extract_if_condition(self, if_node, source: bytes) -> str:
         """
@@ -711,7 +696,6 @@ class GroovyASTDiff:
                         file_b_code=block_b.code,
                         similarity_score=similarity,
                         description=description,
-                        modifiers=block_b.modifiers
                     )
                     
                     # Add statement-level comparison for modified and moved_modified blocks
@@ -758,7 +742,6 @@ class GroovyASTDiff:
                         file_b_code=block_b.code,
                         similarity_score=100.0,
                         description=description,
-                        modifiers=block_b.modifiers
                     )
                     
                     diffs.append(diff)
@@ -864,7 +847,6 @@ class GroovyASTDiff:
                 file_b_code=block_b.code,
                 similarity_score=similarity * 100,
                 description=description,
-                modifiers=block_b.modifiers
             )
             
             # Add statement-level comparison for modified and moved_modified blocks
@@ -890,7 +872,6 @@ class GroovyASTDiff:
                     file_a_code=block_a.code,
                     similarity_score=0.0,
                     description=f"Deleted {block_a.block_type.value} '{block_a.identifier}'",
-                    modifiers=block_a.modifiers
                 )
                 diffs.append(diff)
         
@@ -906,7 +887,6 @@ class GroovyASTDiff:
                     file_b_code=block_b.code,
                     similarity_score=0.0,
                     description=f"Added {block_b.block_type.value} '{block_b.identifier}'",
-                    modifiers=block_b.modifiers
                 )
                 diffs.append(diff)
         
@@ -3203,8 +3183,7 @@ def format_output(result: ComparisonResult) -> str:
                     elif diff.file_b_start_line:
                         line_info = f" (line {diff.file_b_start_line})"
                     
-                    modifiers_str = " ".join(diff.modifiers) + " " if diff.modifiers else ""
-                    output.append(f"  • {modifiers_str}{diff.block_type.value} '{diff.identifier}'{line_info}")
+                    output.append(f"  • {diff.block_type.value} '{diff.identifier}'{line_info}")
                     if diff.similarity_score > 0:
                         output.append(f"    Similarity: {diff.similarity_score:.1f}%")
                     
@@ -3304,7 +3283,6 @@ def _create_json_result(result: ComparisonResult) -> dict:
             'file_b_code': diff.file_b_code,
             'similarity_score': diff.similarity_score,
             'description': diff.description,
-            'modifiers': diff.modifiers
         }
         
         # Add statement diffs if available
