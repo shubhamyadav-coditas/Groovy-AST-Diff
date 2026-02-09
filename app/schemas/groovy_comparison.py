@@ -18,15 +18,17 @@ class StatementDiffSchema(BaseModel):
     description: str = ""
     old_code: Optional[str] = None
     similarity_score: Optional[float] = None
-    child_diffs: List["StatementDiffSchema"] = []
     is_container: bool = False
     branch_label: Optional[str] = None
+    child_diffs: List["StatementDiffSchema"] = []
+
 
 
 class BlockDiffSchema(BaseModel):
     """Schema for block-level differences."""
 
     change_type: str
+    description: str = ""
     block_type: str
     identifier: str
     file_a_start_line: Optional[int] = None
@@ -37,7 +39,7 @@ class BlockDiffSchema(BaseModel):
     file_b_code: Optional[str] = None
     similarity_score: float = 0.0
     statement_diffs: List[StatementDiffSchema] = []
-    description: str = ""
+
 
 
 class ComparisonSummary(BaseModel):
