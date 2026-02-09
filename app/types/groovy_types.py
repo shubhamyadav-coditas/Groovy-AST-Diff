@@ -11,12 +11,12 @@ from enum import Enum
 class ChangeType(Enum):
     """Types of changes detected during AST comparison."""
 
-    ADDED = "added"                    # Block exists only in new file
-    DELETED = "deleted"                # Block exists only in old file
-    MODIFIED = "modified"              # Same identifier, different content
-    MOVED = "moved"                    # Same content, different position
-    MOVED_MODIFIED = "moved_modified"  # Different position AND content changed
-    UNCHANGED = "unchanged"            # Identical in both files
+    ADDED = "ADDED"                    # Block exists only in new file
+    DELETED = "DELETED"                # Block exists only in old file
+    MODIFIED = "MODIFIED"              # Same identifier, different content
+    MOVED = "MOVED"                    # Same content, different position
+    MOVED_MODIFIED = "MOVED_AND_MODIFIED"  # Different position AND content changed
+    UNCHANGED = "UNCHANGED"            # Identical in both files
 
 
 class BlockType(Enum):
@@ -85,12 +85,12 @@ class BlockType(Enum):
 class StatementChangeType(Enum):
     """Types of changes for individual statements within a block."""
 
-    ADDED = "added"                    # Statement exists only in new version
-    DELETED = "deleted"                # Statement exists only in old version
-    MODIFIED = "modified"              # Statement changed (similar but not identical)
-    MOVED = "moved"                    # Same statement, different position
-    MOVED_MODIFIED = "moved_modified"  # Moved AND content changed
-    UNCHANGED = "unchanged"            # Identical statement at same position
+    ADDED = "ADDED"                    # Statement exists only in new version
+    DELETED = "DELETED"                # Statement exists only in old version
+    MODIFIED = "MODIFIED"              # Statement changed (similar but not identical)
+    MOVED = "MOVED"                    # Same statement, different position
+    MOVED_MODIFIED = "MOVED_AND_MODIFIED"  # Moved AND content changed
+    UNCHANGED = "UNCHANGED"            # Identical statement at same position
 
 
 # Groovy node type mappings
